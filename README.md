@@ -54,6 +54,5 @@ left/right channel gains. It changes balance, not the selected audio device.
 
 The app captures the original left/right session values before changing them and
 restores those values when you stop routing or close the window. If the process
-is force-killed, Windows may retain the last session balance; reopen the app,
-start routing, then stop it to restore active sessions.
-
+is force-killed, Windows may retain the last session balance. Restart the affected
+audio app to create a fresh session, or reset its channel balance in Windows.

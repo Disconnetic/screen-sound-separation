@@ -24,6 +24,7 @@ class SeparationApp(tk.Tk):
         self.configure(bg=BG)
         self.router = AudioRouter()
         self.running = False
+        self._after_id: str | None = None
         self.separation = tk.DoubleVar(value=75)
         self.status = tk.StringVar(value="Routing is off")
         self.strength_text = tk.StringVar(value="75%")
@@ -98,11 +99,14 @@ class SeparationApp(tk.Tk):
     def _slider_changed(self, value: str) -> None:
         self.strength_text.set(f"{round(float(value))}%")
         if self.running:
-            self._refresh()
+            self._apply_once()
 
     def _toggle(self) -> None:
         if self.running:
             self.running = False
+            if self._after_id is not None:
+                self.after_cancel(self._after_id)
+                self._after_id = None
             self.router.restore()
             self.toggle.configure(text="Start routing")
             self.status.set("Routing is off · original balance restored")
@@ -116,13 +120,16 @@ class SeparationApp(tk.Tk):
     def _refresh(self) -> None:
         if not self.running:
             return
+        self._apply_once()
+        self._after_id = self.after(1000, self._refresh)
+
+    def _apply_once(self) -> None:
         try:
             apps = self.router.apply(self.separation.get() / 100.0)
             self._render(apps)
             self.status.set(f"Routing {len(apps)} audio app{'s' if len(apps) != 1 else ''}")
         except Exception as exc:  # keep the UI responsive if Windows audio resets
             self.status.set(f"Audio unavailable: {exc}")
-        self.after(1000, self._refresh)
 
     def _render(self, apps: list[RoutedApp]) -> None:
         self.tree.delete(*self.tree.get_children())
@@ -138,6 +145,8 @@ class SeparationApp(tk.Tk):
 
     def _close(self) -> None:
         self.running = False
+        if self._after_id is not None:
+            self.after_cancel(self._after_id)
         self.router.restore()
         self.destroy()
 
@@ -149,4 +158,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
