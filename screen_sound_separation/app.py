@@ -134,7 +134,9 @@ class SeparationApp(tk.Tk):
     def _render(self, apps: list[RoutedApp]) -> None:
         self.tree.delete(*self.tree.get_children())
         for app in apps:
-            if app.position < -0.2:
+            if app.title == "No visible window":
+                side = "No window"
+            elif app.position < -0.2:
                 side = "Left"
             elif app.position > 0.2:
                 side = "Right"

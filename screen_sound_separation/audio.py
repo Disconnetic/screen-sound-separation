@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+import psutil
 from pycaw.pycaw import AudioUtilities
 
-from .routing import channel_gains, normalized_position
-from .windows import visible_windows_by_pid, virtual_desktop_bounds
+from .routing import channel_gains
+from .windows import WindowInfo, monitor_layout, monitor_position, visible_windows_by_pid
 
 
 log = logging.getLogger(__name__)
@@ -38,9 +39,44 @@ class AudioRouter:
     def set_excluded(self, process_names: set[str]) -> None:
         self._excluded = {name.casefold() for name in process_names}
 
+    @staticmethod
+    def _window_for_session(
+        process: psutil.Process, windows: dict[int, WindowInfo]
+    ) -> WindowInfo | None:
+        """Find a UI window for an audio process, including browser child processes."""
+        direct = windows.get(process.pid)
+        if direct is not None:
+            return direct
+
+        # Chromium and similar apps put audio in a child process while the visible
+        # window belongs to a parent with the same executable.
+        try:
+            process_name = process.name().casefold()
+            for parent in process.parents():
+                window = windows.get(parent.pid)
+                if window is not None and parent.name().casefold() == process_name:
+                    return window
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+        # Some app frameworks use sibling UI and audio processes. Match those by
+        # executable name and favor the largest visible window.
+        try:
+            process_name = process.name().casefold()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return None
+        candidates: list[WindowInfo] = []
+        for pid, window in windows.items():
+            try:
+                if psutil.Process(pid).name().casefold() == process_name:
+                    candidates.append(window)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return max(candidates, key=lambda item: item.area, default=None)
+
     def apply(self, separation: float) -> list[RoutedApp]:
         windows = visible_windows_by_pid()
-        desktop_left, desktop_right = virtual_desktop_bounds()
+        monitors = monitor_layout()
         routed: list[RoutedApp] = []
 
         for session in AudioUtilities.GetAllSessions():
@@ -49,7 +85,7 @@ class AudioRouter:
                 continue
             try:
                 name = process.name()
-                window = windows.get(session.ProcessId)
+                window = self._window_for_session(process, windows)
                 channels = session.channelAudioVolume()
                 if channels.GetChannelCount() < 2:
                     continue
@@ -67,9 +103,7 @@ class AudioRouter:
                     title = "No visible window" if window is None else window.title
                     position = 0.0
                 else:
-                    position = normalized_position(
-                        window.center_x, desktop_left, desktop_right
-                    )
+                    position = monitor_position(window, monitors)
                     gains = channel_gains(position, separation)
                     title = window.title
 
@@ -97,4 +131,3 @@ class AudioRouter:
             except (OSError, RuntimeError):
                 log.debug("Audio session disappeared while restoring", exc_info=True)
         self._original.clear()
-
