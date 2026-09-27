@@ -83,7 +83,8 @@ def test_native_host_forwards_messages_end_to_end() -> None:
     assert process.stdin is not None
     assert process.stdout is not None
     try:
-        write_native_message(process.stdin, {"type": "hello", "launchIfNeeded": False})
+        # A pre-0.3 extension sends no hello. It must still connect when the
+        # desktop app is already running so updating files never breaks audio.
         assert read_native_message(process.stdout) == {
             "type": "state",
             "enabled": True,

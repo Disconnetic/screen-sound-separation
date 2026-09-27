@@ -128,15 +128,19 @@ def run() -> int:
     stdin, stdout = _binary_stdio()
     output_lock = threading.Lock()
 
-    # Every connection begins with an extension hello. Background reconnects
-    # never launch the GUI; a toolbar click explicitly opts into doing so.
-    try:
-        hello = read_native_message(stdin)
-    except (EOFError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
-        _log(f"invalid extension hello: {exc!r}")
-        return 1
-    launch_if_needed = bool(hello and hello.get("launchIfNeeded"))
-    connection = _connect_to_desktop(launch_if_needed)
+    # Connect immediately when the app is already open. This keeps older
+    # extension workers compatible while Chrome is waiting for a manual reload.
+    # If the app is closed, the current extension sends a hello that states
+    # whether an explicit toolbar click should launch it.
+    connection = _connect_to_desktop(False)
+    if connection is None:
+        try:
+            hello = read_native_message(stdin)
+        except (EOFError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+            _log(f"invalid extension hello: {exc!r}")
+            return 1
+        launch_if_needed = bool(hello and hello.get("launchIfNeeded"))
+        connection = _connect_to_desktop(launch_if_needed)
     if connection is None:
         return 1
     _log("connected to desktop")

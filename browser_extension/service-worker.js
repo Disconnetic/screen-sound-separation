@@ -68,7 +68,6 @@ function connectToDesktop(launchIfNeeded = false) {
   try {
     const port = chrome.runtime.connectNative(NATIVE_HOST);
     nativePort = port;
-    port.postMessage({ type: "hello", launchIfNeeded });
     port.onMessage.addListener((message) => {
       desktopState.connected = true;
       settleConnectionWaiters(true);
@@ -103,6 +102,7 @@ function connectToDesktop(launchIfNeeded = false) {
       releaseAll().catch(console.error);
       updateActionState().catch(console.error);
     });
+    port.postMessage({ type: "hello", launchIfNeeded });
   } catch (error) {
     nativePort = null;
     console.debug("Desktop app is not available", error);
