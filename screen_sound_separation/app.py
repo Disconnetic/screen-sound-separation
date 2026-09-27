@@ -5,6 +5,7 @@ from __future__ import annotations
 import atexit
 import ctypes
 import tkinter as tk
+from ctypes import wintypes
 from importlib.resources import files
 from tkinter import ttk
 
@@ -25,6 +26,7 @@ GREEN = "#34d399"
 RED = "#fb7185"
 
 APP_ID = "ThatOneGuyBanks.ScreenSoundSeparation"
+ERROR_ALREADY_EXISTS = 183
 
 
 def _asset_path(name: str) -> str:
@@ -40,6 +42,29 @@ def _set_windows_identity() -> None:
         # Keeping this harmless makes importing the UI possible on non-Windows
         # machines, even though audio routing itself remains Windows-only.
         pass
+
+
+def _acquire_instance_mutex() -> int | None:
+    """Return a Windows mutex handle, or ``None`` when the app is already open."""
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+    handle = kernel32.CreateMutexW(None, False, f"Local\\{APP_ID}")
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
+        kernel32.CloseHandle(handle)
+        return None
+    return int(handle)
+
+
+def _release_instance_mutex(handle: int) -> None:
+    """Release the single-instance guard created at startup."""
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle(handle)
 
 
 class SeparationApp(tk.Tk):
@@ -390,12 +415,25 @@ class SeparationApp(tk.Tk):
 
 
 def main() -> None:
-    app = SeparationApp()
+    mutex = _acquire_instance_mutex()
+    if mutex is None:
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "Screen Sound Separation is already running.",
+            "Screen Sound Separation",
+            0x40,  # MB_ICONINFORMATION
+        )
+        return
+
+    app: SeparationApp | None = None
     try:
+        app = SeparationApp()
         app.mainloop()
     finally:
-        # Covers KeyboardInterrupt and unexpected errors escaping Tk's event loop.
-        app.router.restore()
+        if app is not None:
+            # Covers KeyboardInterrupt and unexpected errors escaping Tk's event loop.
+            app.router.restore()
+        _release_instance_mutex(mutex)
 
 
 if __name__ == "__main__":
