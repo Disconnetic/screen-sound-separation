@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { computePanForWindow } = require("../browser_extension/layout.js");
+const { computePanForDisplay, computePanForWindow } = require("../browser_extension/layout.js");
 
 const twoWindows = [
   { id: 1, left: 0, width: 1920, state: "normal" },
@@ -23,5 +23,22 @@ const minimizedIgnored = [
   ...twoWindows,
 ];
 assert.equal(computePanForWindow(minimizedIgnored, 1), -1);
+
+const displays = [
+  { id: "left", bounds: { left: -1920, top: 0, width: 1920, height: 1080 } },
+  { id: "right", bounds: { left: 0, top: 0, width: 1920, height: 1080 } },
+];
+assert.equal(
+  computePanForDisplay(displays, { left: -1800, top: 50, width: 1000, height: 800 }),
+  -1,
+);
+assert.equal(
+  computePanForDisplay(displays, { left: 200, top: 50, width: 1000, height: 800 }),
+  1,
+);
+assert.equal(
+  computePanForDisplay(displays, { left: -200, top: 0, width: 500, height: 800 }),
+  1,
+);
 
 console.log("extension layout tests passed");

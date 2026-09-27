@@ -5,6 +5,8 @@ const NATIVE_HOST = "com.thatoneguybanks.screen_sound_separation.browser";
 let creatingOffscreenDocument = null;
 let nativePort = null;
 let desktopState = { connected: false, enabled: false, separation: 0.75 };
+let connectionWaiters = [];
+const tabOverrides = new Map();
 
 async function updateActionState() {
   let title = "Open the Screen Sound Separation desktop app first.";
@@ -35,32 +37,69 @@ async function showNotReady(tabId, message) {
   await chrome.action.setTitle({ tabId, title: message });
 }
 
-function connectToDesktop() {
-  if (nativePort) return;
+function settleConnectionWaiters(connected) {
+  const waiters = connectionWaiters;
+  connectionWaiters = [];
+  waiters.forEach((resolve) => resolve(connected));
+}
+
+function waitForDesktop(timeoutMs = 14000) {
+  if (desktopState.connected) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      connectionWaiters = connectionWaiters.filter((waiter) => waiter !== finish);
+      resolve(false);
+    }, timeoutMs);
+    const finish = (connected) => {
+      clearTimeout(timer);
+      resolve(connected);
+    };
+    connectionWaiters.push(finish);
+  });
+}
+
+function connectToDesktop(launchIfNeeded = false) {
+  if (nativePort && (!launchIfNeeded || desktopState.connected)) return;
+  if (nativePort) {
+    nativePort.disconnect();
+    nativePort = null;
+  }
 
   try {
     const port = chrome.runtime.connectNative(NATIVE_HOST);
     nativePort = port;
+    port.postMessage({ type: "hello", launchIfNeeded });
     port.onMessage.addListener((message) => {
       desktopState.connected = true;
+      settleConnectionWaiters(true);
       if (message.type === "state") {
+        const wasEnabled = desktopState.enabled;
         desktopState.enabled = Boolean(message.enabled);
         desktopState.separation = Math.max(0, Math.min(1, Number(message.separation) || 0));
         if (desktopState.enabled) {
           refreshCapturedTabs().catch(console.error);
-        } else {
+        } else if (wasEnabled) {
           releaseAll().catch(console.error);
         }
         updateActionState().catch(console.error);
       } else if (message.type === "release_all") {
         releaseAll().catch(console.error);
+      } else if (message.type === "tab_position") {
+        if (message.position == null) {
+          tabOverrides.delete(message.tabId);
+        } else {
+          tabOverrides.set(message.tabId, Math.max(-1, Math.min(1, Number(message.position))));
+        }
+        refreshCapturedTabs().catch(console.error);
       }
     });
     port.onDisconnect.addListener(() => {
+      if (nativePort !== port) return;
       const detail = chrome.runtime.lastError?.message;
       if (detail) console.debug("Desktop bridge disconnected", detail);
       nativePort = null;
       desktopState = { ...desktopState, connected: false, enabled: false };
+      settleConnectionWaiters(false);
       releaseAll().catch(console.error);
       updateActionState().catch(console.error);
     });
@@ -107,8 +146,21 @@ async function ensureOffscreenDocument() {
 }
 
 async function currentPan(windowId) {
-  const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
-  return computePanForWindow(windows, windowId);
+  try {
+    const [window, displays] = await Promise.all([
+      chrome.windows.get(windowId),
+      chrome.system.display.getInfo(),
+    ]);
+    return computePanForDisplay(displays, window);
+  } catch (error) {
+    console.debug("Display metadata unavailable; using Chrome windows", error);
+    const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
+    return computePanForWindow(windows, windowId);
+  }
+}
+
+async function positionForTab(tabId, windowId) {
+  return tabOverrides.has(tabId) ? tabOverrides.get(tabId) : currentPan(windowId);
 }
 
 function badgeForPan(pan) {
@@ -150,16 +202,6 @@ async function releaseAll() {
 chrome.action.onClicked.addListener(async (tab) => {
   if (tab.id == null || tab.windowId == null) return;
 
-  connectToDesktop();
-  if (!desktopState.connected) {
-    await showNotReady(tab.id, "Open the Screen Sound Separation desktop app first.");
-    return;
-  }
-  if (!desktopState.enabled) {
-    await showNotReady(tab.id, "Connected. Start routing in the desktop app first.");
-    return;
-  }
-
   try {
     const captures = await chrome.tabCapture.getCapturedTabs();
     const existing = captures.find(
@@ -170,8 +212,10 @@ chrome.action.onClicked.addListener(async (tab) => {
       return;
     }
 
+    // Reserve and consume the tab stream while Chrome's toolbar-click gesture
+    // is active. The desktop app can safely start in parallel afterward.
     await ensureOffscreenDocument();
-    const position = await currentPan(tab.windowId);
+    const position = await positionForTab(tab.id, tab.windowId);
     const pan = position * desktopState.separation;
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
     const result = await chrome.runtime.sendMessage({
@@ -185,13 +229,34 @@ chrome.action.onClicked.addListener(async (tab) => {
     if (!result?.ok) {
       throw new Error(result?.error || "The tab audio graph did not start.");
     }
-    await setManagedBadge(tab.id, pan);
+
+    connectToDesktop(true);
+    if (!(await waitForDesktop())) {
+      await stopCapture(tab.id);
+      await showNotReady(tab.id, "Could not open the Screen Sound Separation desktop app.");
+      return;
+    }
+    if (!desktopState.enabled) {
+      notifyDesktop({ type: "request_start" });
+      desktopState.enabled = true;
+      updateActionState().catch(console.error);
+    }
+
+    const finalPan = position * desktopState.separation;
+    await chrome.runtime.sendMessage({
+      target: "offscreen",
+      type: "update",
+      tabId: tab.id,
+      windowId: tab.windowId,
+      pan: finalPan,
+    });
+    await setManagedBadge(tab.id, finalPan);
     notifyDesktop({
       type: "tab_status",
       tabId: tab.id,
       title: tab.title || "Browser tab",
       side: position < -0.2 ? "Left" : position > 0.2 ? "Right" : "Centre",
-      pan,
+      pan: finalPan,
       captured: true,
     });
   } catch (error) {
@@ -209,7 +274,7 @@ async function refreshCapturedTabs() {
     active.map(async (capture) => {
       try {
         const tab = await chrome.tabs.get(capture.tabId);
-        const position = await currentPan(tab.windowId);
+        const position = await positionForTab(capture.tabId, tab.windowId);
         const pan = position * desktopState.separation;
         await chrome.runtime.sendMessage({
           target: "offscreen",
@@ -243,5 +308,6 @@ chrome.tabs.onAttached.addListener(() => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  tabOverrides.delete(tabId);
   chrome.runtime.sendMessage({ target: "offscreen", type: "stop", tabId }).catch(() => {});
 });

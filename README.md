@@ -19,6 +19,9 @@ strongly the two sides are separated.
   icon.
 - Prevents multiple router instances from competing over the same audio sessions.
 - Adds optional per-tab Chrome separation through a small companion extension.
+- Detects the physical display containing each captured browser window, even
+  when only one Chrome window is open.
+- Lets you click a row's **Window** value to choose Auto, Left, Right, or Centre.
 - Ships as one Windows executable that installs its browser bridge per user.
 
 ## Run it
@@ -35,8 +38,9 @@ place their windows on different monitors.
 
 For browser tabs, select **Set up extension** in the app. The unpublished
 development build opens the bundled extension folder and explains how to load it.
-Once the extension is on the Chrome Web Store, this button will open its normal
-**Add to Chrome** page instead.
+After that one-time setup, clicking the extension on a tab can open the desktop
+app, start routing, and capture that tab in one action. Once the extension is on
+the Chrome Web Store, the setup button will open its normal **Add to Chrome** page.
 
 For development:
 
@@ -77,6 +81,10 @@ Windows exposes each application's audio session through Core Audio. The app
 matches a session's process ID to its largest visible top-level window, maps the
 window's horizontal position across the virtual desktop, and applies independent
 left/right channel gains. It changes balance, not the selected audio device.
+
+Captured browser tabs use Chrome's display metadata to identify their physical
+monitor. **Auto** follows that display; the row menu can override a mistaken or
+unusual layout without changing the Windows display configuration.
 
 ## Prototype limitations
 

@@ -97,3 +97,37 @@ def test_startup_repair_centres_stale_channel_balance(monkeypatch) -> None:
     AudioRouter().repair_stale_balances()
 
     assert session.channels.values == [1.0, 1.0]
+
+
+def test_position_override_can_be_set_and_returned_to_auto() -> None:
+    from screen_sound_separation.audio import AudioRouter
+
+    router = AudioRouter()
+    router.set_position_override("Example.exe", -1)
+    assert router._position_overrides == {"example.exe": -1}
+
+    router.set_position_override("EXAMPLE.EXE", None)
+    assert router._position_overrides == {}
+
+
+def test_position_override_works_without_a_detected_window(monkeypatch) -> None:
+    from screen_sound_separation import audio
+
+    class FakeProcess:
+        @staticmethod
+        def name() -> str:
+            return "Example.exe"
+
+    session = FakeSession("manual-session")
+    session.Process = FakeProcess()
+    monkeypatch.setattr(audio.AudioUtilities, "GetAllSessions", lambda: [session])
+    monkeypatch.setattr(audio, "visible_windows_by_pid", lambda: {})
+    monkeypatch.setattr(audio, "monitor_layout", lambda: [])
+    monkeypatch.setattr(audio.AudioRouter, "_window_for_session", lambda *_args: None)
+
+    router = audio.AudioRouter()
+    router.set_position_override("Example.exe", -1)
+    routed = router.apply(0.75)
+
+    assert session.channels.values == [1.0, 0.25]
+    assert routed[0].position == -1

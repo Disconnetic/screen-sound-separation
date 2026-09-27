@@ -6,7 +6,7 @@ $Dist = Join-Path $ProjectRoot "dist"
 $Icon = Join-Path $ProjectRoot "screen_sound_separation\assets\app-icon.ico"
 $VersionInfo = Join-Path $ProjectRoot "packaging\version_info.txt"
 $ExtensionSource = Join-Path $ProjectRoot "browser_extension"
-$ExtensionZip = Join-Path $Dist "ScreenSoundSeparation-BrowserSupport-0.2.1.zip"
+$ExtensionZip = Join-Path $Dist "ScreenSoundSeparation-BrowserSupport-0.3.0.zip"
 
 if (-not (Test-Path -LiteralPath $Python)) {
     throw "Create the project virtual environment before building."

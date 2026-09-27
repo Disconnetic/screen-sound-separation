@@ -6,8 +6,10 @@ import json
 import os
 import socket
 import struct
+import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO, Any
@@ -73,17 +75,71 @@ def _binary_stdio() -> tuple[BinaryIO, BinaryIO]:
     return stdin, stdout
 
 
+def _launch_desktop() -> bool:
+    """Launch the last registered desktop executable for a user-requested tab."""
+    config_path = (
+        Path(os.environ.get("LOCALAPPDATA", Path.home()))
+        / "ScreenSoundSeparation"
+        / "desktop-launch.json"
+    )
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        executable = Path(config["executable"])
+        arguments = [str(value) for value in config.get("arguments", [])]
+        working_directory = Path(config.get("working_directory") or executable.parent)
+        if not executable.is_file() or not working_directory.is_dir():
+            raise FileNotFoundError("The registered desktop command is no longer available.")
+        subprocess.Popen(
+            [str(executable), *arguments],
+            cwd=str(working_directory),
+            close_fds=True,
+        )
+        _log(f"desktop launch requested: {executable}")
+        return True
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        _log(f"desktop launch failed: {exc!r}")
+        return False
+
+
+def _connect_to_desktop(launch_if_needed: bool) -> socket.socket | None:
+    try:
+        connection = socket.create_connection((BRIDGE_HOST, BRIDGE_PORT), timeout=0.75)
+        connection.settimeout(None)
+        return connection
+    except OSError as first_error:
+        if not launch_if_needed or not _launch_desktop():
+            _log(f"desktop connection failed: {first_error!r}")
+            return None
+
+    deadline = time.monotonic() + 12.0
+    while time.monotonic() < deadline:
+        try:
+            connection = socket.create_connection((BRIDGE_HOST, BRIDGE_PORT), timeout=0.5)
+            connection.settimeout(None)
+            return connection
+        except OSError:
+            time.sleep(0.2)
+    _log("desktop did not start before the connection deadline")
+    return None
+
+
 def run() -> int:
     _log("host starting")
     stdin, stdout = _binary_stdio()
     output_lock = threading.Lock()
+
+    # Every connection begins with an extension hello. Background reconnects
+    # never launch the GUI; a toolbar click explicitly opts into doing so.
     try:
-        connection = socket.create_connection((BRIDGE_HOST, BRIDGE_PORT), timeout=2.0)
-        connection.settimeout(None)
-        _log("connected to desktop")
-    except OSError as exc:
-        _log(f"desktop connection failed: {exc!r}")
+        hello = read_native_message(stdin)
+    except (EOFError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        _log(f"invalid extension hello: {exc!r}")
         return 1
+    launch_if_needed = bool(hello and hello.get("launchIfNeeded"))
+    connection = _connect_to_desktop(launch_if_needed)
+    if connection is None:
+        return 1
+    _log("connected to desktop")
 
     def desktop_to_extension() -> None:
         try:

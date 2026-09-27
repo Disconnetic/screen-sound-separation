@@ -31,6 +31,7 @@ class AudioRouter:
     def __init__(self) -> None:
         self._touched: set[str] = set()
         self._excluded: set[str] = set()
+        self._position_overrides: dict[str, float] = {}
 
     @property
     def excluded(self) -> set[str]:
@@ -38,6 +39,14 @@ class AudioRouter:
 
     def set_excluded(self, process_names: set[str]) -> None:
         self._excluded = {name.casefold() for name in process_names}
+
+    def set_position_override(self, process_name: str, position: float | None) -> None:
+        """Override one executable's detected position, or return it to Auto."""
+        key = process_name.casefold()
+        if position is None:
+            self._position_overrides.pop(key, None)
+        else:
+            self._position_overrides[key] = max(-1.0, min(1.0, position))
 
     @staticmethod
     def _window_for_session(
@@ -90,9 +99,18 @@ class AudioRouter:
                 if channels.GetChannelCount() < 2:
                     continue
 
-                if window is None or name.casefold() in self._excluded:
+                override = self._position_overrides.get(name.casefold())
+                if name.casefold() in self._excluded:
                     gains = (1.0, 1.0)
                     title = "No visible window" if window is None else window.title
+                    position = 0.0
+                elif override is not None:
+                    position = override
+                    gains = channel_gains(position, separation)
+                    title = "No visible window" if window is None else window.title
+                elif window is None:
+                    gains = (1.0, 1.0)
+                    title = "No visible window"
                     position = 0.0
                 else:
                     position = monitor_position(window, monitors)

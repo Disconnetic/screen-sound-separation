@@ -83,6 +83,7 @@ def test_native_host_forwards_messages_end_to_end() -> None:
     assert process.stdin is not None
     assert process.stdout is not None
     try:
+        write_native_message(process.stdin, {"type": "hello", "launchIfNeeded": False})
         assert read_native_message(process.stdout) == {
             "type": "state",
             "enabled": True,

@@ -22,18 +22,17 @@ from .browser import (
 )
 
 
-# A small, shared palette keeps the UI consistent without introducing a theme
-# dependency for what is intentionally a lightweight utility.
-BG = "#090e1a"
-SURFACE = "#111827"
-SURFACE_RAISED = "#172033"
-BORDER = "#263248"
-TEXT = "#f4f7ff"
-MUTED = "#94a3b8"
-VIOLET = "#9b6cff"
-CYAN = "#22d3ee"
-GREEN = "#34d399"
-RED = "#fb7185"
+# Disconnetic's site palette: night, chalk, flare, and signal. Slightly raised
+# near-black surfaces retain the brand contrast without flattening the UI.
+BG = "#090A0A"
+SURFACE = "#101211"
+SURFACE_RAISED = "#181B19"
+BORDER = "#343936"
+TEXT = "#F1EEE5"
+MUTED = "#96978F"
+ORANGE = "#FD5F39"
+SIGNAL = "#C9FF35"
+RED = ORANGE
 
 APP_ID = "ThatOneGuyBanks.ScreenSoundSeparation"
 ERROR_ALREADY_EXISTS = 183
@@ -85,8 +84,8 @@ class SeparationApp(tk.Tk):
         super().__init__()
 
         self.title("Screen Sound Separation")
-        self.geometry("800x720")
-        self.minsize(700, 620)
+        self.geometry("820x780")
+        self.minsize(720, 680)
         self.configure(bg=BG)
 
         self.router = AudioRouter()
@@ -112,6 +111,9 @@ class SeparationApp(tk.Tk):
         self._last_apps: list[RoutedApp] = []
         self.browser_tabs: dict[int, BrowserTab] = {}
         self.browser_connected = False
+        self.app_position_overrides: dict[str, float] = {}
+        self.tab_position_overrides: dict[int, float] = {}
+        self._tree_targets: dict[str, tuple[str, str | int]] = {}
         self.separation = tk.DoubleVar(value=75)
         self.strength_text = tk.StringVar(value="75%")
         self.left_mix_text = tk.StringVar()
@@ -141,9 +143,15 @@ class SeparationApp(tk.Tk):
         style.configure("TFrame", background=BG)
         style.configure("Surface.TFrame", background=SURFACE)
         style.configure("Raised.TFrame", background=SURFACE_RAISED)
-        style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 10))
+        style.configure("TLabel", background=BG, foreground=TEXT, font=("Arial", 10))
         style.configure(
-            "Title.TLabel", background=BG, foreground=TEXT, font=("Segoe UI Semibold", 22)
+            "Title.TLabel", background=BG, foreground=TEXT, font=("Arial", 22, "bold")
+        )
+        style.configure(
+            "Eyebrow.TLabel",
+            background=BG,
+            foreground=ORANGE,
+            font=("Consolas", 8, "bold"),
         )
         style.configure("Muted.TLabel", background=BG, foreground=MUTED)
         style.configure("Surface.TLabel", background=SURFACE, foreground=TEXT)
@@ -152,32 +160,32 @@ class SeparationApp(tk.Tk):
             "CardHeading.TLabel",
             background=SURFACE,
             foreground=TEXT,
-            font=("Segoe UI Semibold", 12),
+            font=("Arial", 12, "bold"),
         )
         style.configure(
             "Percent.TLabel",
             background=SURFACE,
-            foreground=VIOLET,
-            font=("Segoe UI Semibold", 24),
+            foreground=ORANGE,
+            font=("Arial", 24, "bold"),
         )
         style.configure(
             "MixTitle.TLabel",
             background=SURFACE_RAISED,
             foreground=MUTED,
-            font=("Segoe UI Semibold", 9),
+            font=("Consolas", 9, "bold"),
         )
         style.configure(
             "MixValue.TLabel",
             background=SURFACE_RAISED,
             foreground=TEXT,
-            font=("Segoe UI Semibold", 11),
+            font=("Consolas", 11, "bold"),
         )
         style.configure(
             "Separator.Horizontal.TScale",
             background=SURFACE,
             troughcolor=BORDER,
-            lightcolor=VIOLET,
-            darkcolor=VIOLET,
+            lightcolor=ORANGE,
+            darkcolor=ORANGE,
             bordercolor=SURFACE,
         )
         style.configure(
@@ -187,17 +195,17 @@ class SeparationApp(tk.Tk):
             foreground=TEXT,
             borderwidth=0,
             rowheight=36,
-            font=("Segoe UI", 10),
+            font=("Arial", 10),
         )
         style.configure(
             "Treeview.Heading",
             background=SURFACE_RAISED,
-            foreground=MUTED,
+            foreground=ORANGE,
             relief="flat",
             borderwidth=0,
-            font=("Segoe UI Semibold", 9),
+            font=("Consolas", 9, "bold"),
         )
-        style.map("Treeview", background=[("selected", "#273451")])
+        style.map("Treeview", background=[("selected", "#29311E")])
         style.map("Treeview.Heading", background=[("active", SURFACE_RAISED)])
         style.configure(
             "App.Vertical.TScrollbar",
@@ -220,9 +228,9 @@ class SeparationApp(tk.Tk):
 
         ttk.Label(
             root,
-            text="Audio follows the monitor containing most of each app window.",
+            text="LOCAL AUDIO ONLY  ·  NOTHING LEAVES THIS DEVICE",
             style="Muted.TLabel",
-            font=("Segoe UI", 9),
+            font=("Consolas", 8, "bold"),
         ).pack(anchor="w", pady=(12, 0))
 
     def _build_header(self, parent: ttk.Frame) -> None:
@@ -236,19 +244,24 @@ class SeparationApp(tk.Tk):
 
         titles = ttk.Frame(header)
         titles.pack(side="left", fill="x", expand=True)
-        ttk.Label(titles, text="Screen Sound Separation", style="Title.TLabel").pack(anchor="w")
         ttk.Label(
             titles,
-            text="Place an app on a screen. Its sound follows.",
+            text="DISCONNETIC  /  FIELD TOOL 001",
+            style="Eyebrow.TLabel",
+        ).pack(anchor="w", pady=(0, 4))
+        ttk.Label(titles, text="SCREEN SOUND SEPARATION", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(
+            titles,
+            text="Place a window. Shape the signal. Hear the space.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(2, 0))
 
         self.status_badge = tk.Label(
             header,
-            text="●  READY",
+            text="●  STANDBY",
             bg=SURFACE_RAISED,
-            fg=MUTED,
-            font=("Segoe UI Semibold", 9),
+            fg=ORANGE,
+            font=("Consolas", 9, "bold"),
             padx=12,
             pady=7,
         )
@@ -289,21 +302,21 @@ class SeparationApp(tk.Tk):
         preview = ttk.Frame(card, style="Surface.TFrame")
         preview.pack(fill="x", pady=(18, 0))
         preview.columnconfigure((0, 1), weight=1, uniform="mix")
-        self._build_mix_panel(preview, 0, "APP ON LEFT SCREEN", self.left_mix_text, VIOLET)
-        self._build_mix_panel(preview, 1, "APP ON RIGHT SCREEN", self.right_mix_text, CYAN)
+        self._build_mix_panel(preview, 0, "LEFT DISPLAY", self.left_mix_text, ORANGE)
+        self._build_mix_panel(preview, 1, "RIGHT DISPLAY", self.right_mix_text, SIGNAL)
 
         self.toggle = tk.Button(
             card,
-            text="▶  Start routing",
+            text="START SIGNAL  →",
             command=self._toggle,
-            bg=VIOLET,
-            activebackground="#ac86ff",
-            fg="white",
-            activeforeground="white",
+            bg=ORANGE,
+            activebackground="#FF6942",
+            fg=BG,
+            activeforeground=BG,
             relief="flat",
             borderwidth=0,
             cursor="hand2",
-            font=("Segoe UI Semibold", 11),
+            font=("Consolas", 11, "bold"),
             padx=20,
             pady=11,
         )
@@ -328,7 +341,7 @@ class SeparationApp(tk.Tk):
             text="●  WAITING",
             bg=SURFACE_RAISED,
             fg=MUTED,
-            font=("Segoe UI Semibold", 9),
+            font=("Consolas", 9, "bold"),
             padx=11,
             pady=6,
         )
@@ -338,13 +351,13 @@ class SeparationApp(tk.Tk):
             text="Set up extension",
             command=self._open_browser_setup,
             bg=SURFACE_RAISED,
-            activebackground="#273451",
+            activebackground=BORDER,
             fg=TEXT,
             activeforeground=TEXT,
             relief="flat",
             borderwidth=0,
             cursor="hand2",
-            font=("Segoe UI Semibold", 9),
+            font=("Consolas", 9, "bold"),
             padx=12,
             pady=6,
         )
@@ -397,7 +410,7 @@ class SeparationApp(tk.Tk):
         section_heading = ttk.Frame(section)
         section_heading.pack(fill="x", pady=(0, 8))
         ttk.Label(
-            section_heading, text="Active audio apps", font=("Segoe UI Semibold", 12)
+            section_heading, text="ACTIVE SIGNALS", font=("Arial", 12, "bold")
         ).pack(side="left")
         self.app_count = ttk.Label(section_heading, text="Waiting to start", style="Muted.TLabel")
         self.app_count.pack(side="right")
@@ -407,13 +420,14 @@ class SeparationApp(tk.Tk):
         columns = ("app", "screen", "mix")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="none")
         self.tree.heading("app", text="APPLICATION")
-        self.tree.heading("screen", text="WINDOW")
+        self.tree.heading("screen", text="WINDOW  ▾")
         self.tree.heading("mix", text="OUTPUT MIX")
         self.tree.column("app", width=280, minwidth=180)
         self.tree.column("screen", width=130, minwidth=100, anchor="center")
         self.tree.column("mix", width=190, minwidth=150, anchor="center")
         self.tree.tag_configure("even", background=SURFACE)
-        self.tree.tag_configure("odd", background="#141d2e")
+        self.tree.tag_configure("odd", background="#0C0F0D")
+        self.tree.bind("<Button-1>", self._show_position_menu, add="+")
         self.tree.pack(side="left", fill="both", expand=True)
 
         scrollbar = ttk.Scrollbar(
@@ -447,15 +461,15 @@ class SeparationApp(tk.Tk):
             self.browser_bridge.update(False, self.separation.get() / 100.0)
             self.browser_bridge.release_all()
             self.router.restore()
-            self.toggle.configure(text="▶  Start routing", bg=VIOLET)
-            self.status_badge.configure(text="●  READY", fg=MUTED)
+            self.toggle.configure(text="START SIGNAL  →", bg=ORANGE, fg=BG)
+            self.status_badge.configure(text="●  STANDBY", fg=ORANGE)
             self.app_count.configure(text="Waiting to start")
             self._render([])
         else:
             self.running = True
             self.browser_bridge.update(True, self.separation.get() / 100.0)
-            self.toggle.configure(text="■  Stop and restore audio", bg="#334155")
-            self.status_badge.configure(text="●  ACTIVE", fg=GREEN)
+            self.toggle.configure(text="STOP + RESTORE", bg=SURFACE_RAISED, fg=SIGNAL)
+            self.status_badge.configure(text="●  LIVE", fg=SIGNAL)
             self._refresh()
 
     def _refresh(self) -> None:
@@ -472,7 +486,7 @@ class SeparationApp(tk.Tk):
             self._last_apps = apps
             self._render(apps)
             count = len(apps) + len(self.browser_tabs)
-            self.status_badge.configure(text="●  ACTIVE", fg=GREEN)
+            self.status_badge.configure(text="●  LIVE", fg=SIGNAL)
             self.app_count.configure(text=f"{count} detected")
         except Exception as exc:  # Keep the UI responsive if Windows audio resets.
             self.status_badge.configure(text="●  AUDIO ERROR", fg=RED)
@@ -480,7 +494,8 @@ class SeparationApp(tk.Tk):
 
     def _render(self, apps: list[RoutedApp]) -> None:
         self.tree.delete(*self.tree.get_children())
-        rows: list[tuple[str, str, str]] = []
+        self._tree_targets.clear()
+        rows: list[tuple[tuple[str, str, str], tuple[str, str | int]]] = []
         for app in apps:
             if app.title == "No visible window":
                 side = "No window"
@@ -490,8 +505,10 @@ class SeparationApp(tk.Tk):
                 side = "Right"
             else:
                 side = "Centre"
+            if app.name.casefold() in self.app_position_overrides:
+                side += " · Manual"
             mix = f"L {app.left_gain * 100:.0f}%   ·   R {app.right_gain * 100:.0f}%"
-            rows.append((app.name, side, mix))
+            rows.append(((app.name, side, mix), ("app", app.name)))
 
         for tab in sorted(self.browser_tabs.values(), key=lambda item: item.title.casefold()):
             if tab.pan < 0:
@@ -499,15 +516,79 @@ class SeparationApp(tk.Tk):
             else:
                 gains = (1.0 - abs(tab.pan), 1.0)
             mix = f"L {gains[0] * 100:.0f}%   ·   R {gains[1] * 100:.0f}%"
-            rows.append((f"Chrome tab · {tab.title}", tab.side, mix))
+            side = tab.side + (" · Manual" if tab.tab_id in self.tab_position_overrides else "")
+            rows.append(((f"Chrome tab · {tab.title}", side, mix), ("tab", tab.tab_id)))
 
-        for index, values in enumerate(rows):
-            self.tree.insert(
+        for index, (values, target) in enumerate(rows):
+            item_id = self.tree.insert(
                 "",
                 "end",
                 values=values,
                 tags=("even" if index % 2 == 0 else "odd",),
             )
+            self._tree_targets[item_id] = target
+
+    def _show_position_menu(self, event: tk.Event) -> None:
+        """Offer a manual side when the WINDOW column is selected."""
+        if self.tree.identify_column(event.x) != "#2":
+            return
+        item_id = self.tree.identify_row(event.y)
+        target = self._tree_targets.get(item_id)
+        if target is None:
+            return
+
+        menu = tk.Menu(
+            self,
+            tearoff=False,
+            bg=SURFACE_RAISED,
+            fg=TEXT,
+            activebackground=ORANGE,
+            activeforeground=BG,
+            borderwidth=0,
+            font=("Consolas", 9),
+        )
+        for label, position in (("Auto", None), ("Left", -1.0), ("Right", 1.0), ("Centre", 0.0)):
+            menu.add_command(
+                label=label,
+                command=lambda selected=position: self._set_position_override(target, selected),
+            )
+        self._position_menu = menu
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _set_position_override(
+        self, target: tuple[str, str | int], position: float | None
+    ) -> None:
+        kind, key = target
+        if kind == "app":
+            name = str(key)
+            self.router.set_position_override(name, position)
+            if position is None:
+                self.app_position_overrides.pop(name.casefold(), None)
+            else:
+                self.app_position_overrides[name.casefold()] = position
+            if self.running:
+                self._apply_once()
+            return
+
+        tab_id = int(key)
+        self.browser_bridge.set_tab_position(tab_id, position)
+        if position is None:
+            self.tab_position_overrides.pop(tab_id, None)
+        else:
+            self.tab_position_overrides[tab_id] = position
+            tab = self.browser_tabs.get(tab_id)
+            if tab is not None:
+                side = "Left" if position < 0 else "Right" if position > 0 else "Centre"
+                self.browser_tabs[tab_id] = BrowserTab(
+                    tab_id=tab.tab_id,
+                    title=tab.title,
+                    side=side,
+                    pan=position * (self.separation.get() / 100.0),
+                )
+        self._render(self._last_apps)
 
     def _poll_browser(self) -> None:
         """Apply extension status messages on Tk's UI thread."""
@@ -516,10 +597,16 @@ class SeparationApp(tk.Tk):
             event_type = event.get("type")
             if event_type == "connected":
                 self.browser_connected = True
+                for tab_id, position in self.tab_position_overrides.items():
+                    self.browser_bridge.set_tab_position(tab_id, position)
                 changed = True
             elif event_type == "disconnected":
                 self.browser_connected = False
                 self.browser_tabs.clear()
+                changed = True
+            elif event_type == "request_start":
+                if not self.running:
+                    self._toggle()
                 changed = True
             elif event_type == "tab_status":
                 try:
@@ -544,11 +631,11 @@ class SeparationApp(tk.Tk):
         elif self.browser_connected:
             count = len(self.browser_tabs)
             noun = "tab" if count == 1 else "tabs"
-            self.browser_badge.configure(text="●  CONNECTED", fg=GREEN)
+            self.browser_badge.configure(text="●  LINKED", fg=SIGNAL)
             if self.running:
                 detail = f"{count} managed {noun}. Click the extension icon on a tab to toggle it."
             else:
-                detail = "Connected. Start routing to enable browser tab controls."
+                detail = "Ready. Clicking the extension on a tab starts routing automatically."
             self.browser_detail.configure(text=detail)
             self.browser_setup.configure(text="Extension connected", state="disabled")
         else:

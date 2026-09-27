@@ -61,6 +61,11 @@ def install_native_host() -> Path:
         host_path = data_dir / f"native-host-{digest}.exe"
         if not host_path.exists():
             shutil.copy2(bundled_host, host_path)
+        desktop_command = {
+            "executable": str(Path(sys.executable)),
+            "arguments": [],
+            "working_directory": str(Path(sys.executable).parent),
+        }
     else:
         project_root = Path(__file__).resolve().parents[1]
         host_path = data_dir / "native-host.cmd"
@@ -74,6 +79,19 @@ def install_native_host() -> Path:
         )
         if not host_path.exists() or host_path.read_text(encoding="utf-8") != wrapper:
             host_path.write_text(wrapper, encoding="utf-8", newline="")
+        pythonw = python.with_name("pythonw.exe")
+        desktop_command = {
+            "executable": str(pythonw if pythonw.exists() else python),
+            "arguments": ["-m", "screen_sound_separation.app"],
+            "working_directory": str(project_root),
+        }
+
+    # The native helper uses this only after an explicit extension-button click.
+    # Merely starting Chrome never launches the desktop app.
+    launch_path = data_dir / "desktop-launch.json"
+    launch_text = json.dumps(desktop_command, indent=2) + "\n"
+    if not launch_path.exists() or launch_path.read_text(encoding="utf-8") != launch_text:
+        launch_path.write_text(launch_text, encoding="utf-8")
 
     manifest_path = data_dir / "native-messaging-host.json"
     manifest = {
@@ -206,6 +224,10 @@ class BrowserBridge:
 
     def release_all(self) -> None:
         self._broadcast({"type": "release_all"})
+
+    def set_tab_position(self, tab_id: int, position: float | None) -> None:
+        """Set a tab's manual side, or return it to display-based detection."""
+        self._broadcast({"type": "tab_position", "tabId": tab_id, "position": position})
 
     def poll_events(self) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
