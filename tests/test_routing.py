@@ -22,6 +22,19 @@ class FakeSession:
         return self.channels
 
 
+class FakeProcess:
+    def __init__(self, pid: int, name: str, parents: list["FakeProcess"] | None = None) -> None:
+        self.pid = pid
+        self._name = name
+        self._parents = parents or []
+
+    def name(self) -> str:
+        return self._name
+
+    def parents(self) -> list["FakeProcess"]:
+        return self._parents
+
+
 def test_zero_separation_keeps_stereo() -> None:
     assert channel_gains(-1, 0) == (1, 1)
     assert channel_gains(1, 0) == (1, 1)
@@ -83,3 +96,27 @@ def test_restore_returns_sessions_to_their_original_balance(monkeypatch) -> None
 
     assert session.channels.values == [0.8, 0.35]
     assert router._original == {}
+
+
+def test_window_matching_keeps_multiple_windows_from_one_process() -> None:
+    from screen_sound_separation.audio import AudioRouter
+
+    process = FakeProcess(10, "browser.exe")
+    windows = [
+        WindowInfo(10, "Video", 0, 0, 1000, 1000, 101),
+        WindowInfo(10, "Music", 1000, 0, 2000, 1000, 102),
+    ]
+
+    matches = AudioRouter._windows_for_session(process, windows)
+
+    assert [window.title for window in matches] == ["Video", "Music"]
+
+
+def test_window_matching_uses_same_executable_parent_for_audio_child() -> None:
+    from screen_sound_separation.audio import AudioRouter
+
+    browser = FakeProcess(10, "browser.exe")
+    audio_child = FakeProcess(20, "browser.exe", [browser])
+    windows = [WindowInfo(10, "Browser window", 0, 0, 1000, 1000, 101)]
+
+    assert AudioRouter._windows_for_session(audio_child, windows) == windows

@@ -8,7 +8,7 @@ import tkinter as tk
 from importlib.resources import files
 from tkinter import ttk
 
-from .audio import AudioRouter, RoutedApp
+from .audio import AudioRouter, RoutedApp, WindowOption
 
 
 # A small, shared palette keeps the UI consistent without introducing a theme
@@ -50,8 +50,8 @@ class SeparationApp(tk.Tk):
         super().__init__()
 
         self.title("Screen Sound Separation")
-        self.geometry("800x720")
-        self.minsize(700, 620)
+        self.geometry("800x780")
+        self.minsize(700, 680)
         self.configure(bg=BG)
 
         self.router = AudioRouter()
@@ -64,6 +64,12 @@ class SeparationApp(tk.Tk):
         self.strength_text = tk.StringVar(value="75%")
         self.left_mix_text = tk.StringVar()
         self.right_mix_text = tk.StringVar()
+        self.window_choice = tk.StringVar()
+        self.window_match_help = tk.StringVar(value="Select an audio app to inspect its window match.")
+        self._routed_apps: dict[str, RoutedApp] = {}
+        self._row_sessions: dict[str, str] = {}
+        self._window_choice_handles: dict[str, int] = {}
+        self._selected_session: str | None = None
 
         self._load_icon()
         self.protocol("WM_DELETE_WINDOW", self._close)
@@ -154,6 +160,22 @@ class SeparationApp(tk.Tk):
             arrowcolor=MUTED,
             lightcolor=SURFACE_RAISED,
             darkcolor=SURFACE_RAISED,
+        )
+        style.configure(
+            "Window.TCombobox",
+            fieldbackground=SURFACE_RAISED,
+            background=SURFACE_RAISED,
+            foreground=TEXT,
+            arrowcolor=CYAN,
+            bordercolor=BORDER,
+            lightcolor=BORDER,
+            darkcolor=BORDER,
+            padding=7,
+        )
+        style.map(
+            "Window.TCombobox",
+            fieldbackground=[("readonly", SURFACE_RAISED), ("disabled", SURFACE)],
+            foreground=[("readonly", TEXT), ("disabled", MUTED)],
         )
 
     def _build_ui(self) -> None:
@@ -283,19 +305,47 @@ class SeparationApp(tk.Tk):
         self.app_count = ttk.Label(section_heading, text="Waiting to start", style="Muted.TLabel")
         self.app_count.pack(side="right")
 
+        match_panel = ttk.Frame(section, style="Raised.TFrame", padding=(14, 11))
+        match_panel.pack(fill="x", pady=(0, 9))
+        # Pack the fixed-width picker first so the explanatory copy takes only
+        # the space that remains when the window becomes narrow.
+        self.window_picker = ttk.Combobox(
+            match_panel,
+            textvariable=self.window_choice,
+            state="disabled",
+            width=34,
+            style="Window.TCombobox",
+        )
+        self.window_picker.pack(side="right", padx=(14, 0))
+        self.window_picker.bind("<<ComboboxSelected>>", self._window_selected)
+
+        match_copy = ttk.Frame(match_panel, style="Raised.TFrame")
+        match_copy.pack(side="left", fill="x", expand=True)
+        ttk.Label(
+            match_copy,
+            text="FOLLOW WINDOW",
+            style="MixTitle.TLabel",
+        ).pack(anchor="w")
+        ttk.Label(
+            match_copy,
+            textvariable=self.window_match_help,
+            style="MixValue.TLabel",
+        ).pack(anchor="w", pady=(2, 0))
+
         table_frame = ttk.Frame(section, style="Surface.TFrame")
         table_frame.pack(fill="both", expand=True)
         columns = ("app", "screen", "mix")
-        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="none")
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
         self.tree.heading("app", text="APPLICATION")
         self.tree.heading("screen", text="WINDOW")
         self.tree.heading("mix", text="OUTPUT MIX")
         self.tree.column("app", width=280, minwidth=180)
-        self.tree.column("screen", width=130, minwidth=100, anchor="center")
+        self.tree.column("screen", width=160, minwidth=120, anchor="center")
         self.tree.column("mix", width=190, minwidth=150, anchor="center")
         self.tree.tag_configure("even", background=SURFACE)
         self.tree.tag_configure("odd", background="#141d2e")
         self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.bind("<<TreeviewSelect>>", self._app_selected)
 
         scrollbar = ttk.Scrollbar(
             table_frame,
@@ -353,6 +403,9 @@ class SeparationApp(tk.Tk):
             self.app_count.configure(text=f"Audio unavailable: {exc}")
 
     def _render(self, apps: list[RoutedApp]) -> None:
+        previous_session = self._selected_session
+        self._routed_apps = {app.session_id: app for app in apps}
+        self._row_sessions.clear()
         self.tree.delete(*self.tree.get_children())
         for index, app in enumerate(apps):
             if app.title == "No visible window":
@@ -363,13 +416,92 @@ class SeparationApp(tk.Tk):
                 side = "Right"
             else:
                 side = "Centre"
+            if len(app.window_options) > 1:
+                side = f"{side} · {len(app.window_options)} windows"
             mix = f"L {app.left_gain * 100:.0f}%   ·   R {app.right_gain * 100:.0f}%"
+            row_id = f"audio-{index}"
+            self._row_sessions[row_id] = app.session_id
             self.tree.insert(
                 "",
                 "end",
+                iid=row_id,
                 values=(app.name, side, mix),
                 tags=("even" if index % 2 == 0 else "odd",),
             )
+
+        session_to_row = {session: row for row, session in self._row_sessions.items()}
+        if previous_session in session_to_row:
+            row_id = session_to_row[previous_session]
+        else:
+            ambiguous = next(
+                (app for app in apps if len(app.window_options) > 1),
+                apps[0] if apps else None,
+            )
+            row_id = session_to_row.get(ambiguous.session_id) if ambiguous else None
+
+        if row_id is not None:
+            self.tree.selection_set(row_id)
+            self._show_window_choices(self._routed_apps[self._row_sessions[row_id]])
+        else:
+            self._selected_session = None
+            self.window_choice.set("")
+            self.window_picker.configure(values=(), state="disabled")
+            self.window_match_help.set("Select an audio app to inspect its window match.")
+
+    def _app_selected(self, _event: object = None) -> None:
+        selection = self.tree.selection()
+        if not selection:
+            return
+        session_id = self._row_sessions.get(selection[0])
+        app = self._routed_apps.get(session_id) if session_id else None
+        if app is not None:
+            self._show_window_choices(app)
+
+    @staticmethod
+    def _option_side(option: WindowOption) -> str:
+        if option.position < -0.2:
+            return "Left"
+        if option.position > 0.2:
+            return "Right"
+        return "Centre"
+
+    def _show_window_choices(self, app: RoutedApp) -> None:
+        self._selected_session = app.session_id
+        self._window_choice_handles.clear()
+
+        labels: list[str] = []
+        selected_label = ""
+        for option in app.window_options:
+            title = option.title if len(option.title) <= 48 else f"{option.title[:45]}…"
+            label = f"{self._option_side(option)} — {title}"
+            if label in self._window_choice_handles:
+                label = f"{label} [{option.handle}]"
+            labels.append(label)
+            self._window_choice_handles[label] = option.handle
+            if option.handle == app.selected_window:
+                selected_label = label
+
+        self.window_picker.configure(values=labels)
+        self.window_choice.set(selected_label)
+        if len(labels) > 1:
+            self.window_picker.configure(state="readonly")
+            self.window_match_help.set(f"{len(labels)} matching windows found")
+        elif len(labels) == 1:
+            self.window_picker.configure(state="disabled")
+            self.window_match_help.set("Automatically matched to its visible window.")
+        else:
+            self.window_picker.configure(state="disabled")
+            self.window_match_help.set("No visible window; this audio stays centred.")
+
+    def _window_selected(self, _event: object = None) -> None:
+        if self._selected_session is None:
+            return
+        handle = self._window_choice_handles.get(self.window_choice.get())
+        if handle is None:
+            return
+        self.router.set_window_override(self._selected_session, handle)
+        if self.running:
+            self._apply_once()
 
     def _close(self) -> None:
         """Stop scheduled work, restore audio, and then close the window."""

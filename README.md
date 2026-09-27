@@ -17,6 +17,9 @@ strongly the two sides are separated.
 - Leaves background audio and processes without visible windows centered.
 - Uses a native Windows identity and bundled icon instead of the Python taskbar
   icon.
+- Shows a **Follow window** selector when one audio session matches multiple
+  titled windows. This moves the complete shared session; it cannot split audio
+  that the application has already combined internally.
 
 ## Run it
 

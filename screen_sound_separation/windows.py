@@ -19,6 +19,7 @@ class WindowInfo:
     top: int
     right: int
     bottom: int
+    handle: int = 0
 
     @property
     def center_x(self) -> float:
@@ -90,9 +91,9 @@ def virtual_desktop_bounds() -> tuple[int, int]:
     return left, left + width
 
 
-def visible_windows_by_pid() -> dict[int, WindowInfo]:
-    """Return the largest ordinary visible top-level window for each process."""
-    result: dict[int, WindowInfo] = {}
+def visible_windows() -> list[WindowInfo]:
+    """Return ordinary visible top-level windows, including same-process windows."""
+    result: list[WindowInfo] = []
     enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
     @enum_proc
@@ -111,17 +112,41 @@ def visible_windows_by_pid() -> dict[int, WindowInfo]:
         rect = wintypes.RECT()
         if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
             return True
-        info = WindowInfo(0, title_buffer.value, rect.left, rect.top, rect.right, rect.bottom)
+        info = WindowInfo(
+            0,
+            title_buffer.value,
+            rect.left,
+            rect.top,
+            rect.right,
+            rect.bottom,
+            int(hwnd),
+        )
         if info.area < 2_500:
             return True
 
         pid = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        info = WindowInfo(pid.value, info.title, info.left, info.top, info.right, info.bottom)
-        existing = result.get(pid.value)
-        if existing is None or info.area > existing.area:
-            result[pid.value] = info
+        info = WindowInfo(
+            pid.value,
+            info.title,
+            info.left,
+            info.top,
+            info.right,
+            info.bottom,
+            info.handle,
+        )
+        result.append(info)
         return True
 
     user32.EnumWindows(callback, 0)
+    return result
+
+
+def visible_windows_by_pid() -> dict[int, WindowInfo]:
+    """Return the largest visible top-level window for each process."""
+    result: dict[int, WindowInfo] = {}
+    for window in visible_windows():
+        existing = result.get(window.pid)
+        if existing is None or window.area > existing.area:
+            result[window.pid] = window
     return result

@@ -9,20 +9,32 @@ import psutil
 from pycaw.pycaw import AudioUtilities
 
 from .routing import channel_gains
-from .windows import WindowInfo, monitor_layout, monitor_position, visible_windows_by_pid
+from .windows import WindowInfo, monitor_layout, monitor_position, visible_windows
 
 
 log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class WindowOption:
+    """A visible window that an audio session can follow."""
+
+    handle: int
+    title: str
+    position: float
+
+
+@dataclass(frozen=True)
 class RoutedApp:
+    session_id: str
     name: str
     pid: int
     title: str
     position: float
     left_gain: float
     right_gain: float
+    selected_window: int | None
+    window_options: tuple[WindowOption, ...]
 
 
 class AudioRouter:
@@ -31,6 +43,7 @@ class AudioRouter:
     def __init__(self) -> None:
         self._original: dict[str, tuple[float, float]] = {}
         self._excluded: set[str] = set()
+        self._window_overrides: dict[str, int] = {}
 
     @property
     def excluded(self) -> set[str]:
@@ -39,13 +52,22 @@ class AudioRouter:
     def set_excluded(self, process_names: set[str]) -> None:
         self._excluded = {name.casefold() for name in process_names}
 
+    def set_window_override(self, session_id: str, window_handle: int) -> None:
+        """Make one audio session follow a specific matching window."""
+        self._window_overrides[session_id] = window_handle
+
     @staticmethod
-    def _window_for_session(
-        process: psutil.Process, windows: dict[int, WindowInfo]
-    ) -> WindowInfo | None:
-        """Find a UI window for an audio process, including browser child processes."""
-        direct = windows.get(process.pid)
-        if direct is not None:
+    def _windows_for_session(
+        process: psutil.Process, windows: list[WindowInfo]
+    ) -> list[WindowInfo]:
+        """Find all plausible UI windows for an audio process.
+
+        Keeping every match is important for applications that own several
+        titled windows with one process. The UI can then let the user choose the
+        window that the shared audio session should follow.
+        """
+        direct = [window for window in windows if window.pid == process.pid]
+        if direct:
             return direct
 
         # Chromium and similar apps put audio in a child process while the visible
@@ -53,9 +75,11 @@ class AudioRouter:
         try:
             process_name = process.name().casefold()
             for parent in process.parents():
-                window = windows.get(parent.pid)
-                if window is not None and parent.name().casefold() == process_name:
-                    return window
+                if parent.name().casefold() != process_name:
+                    continue
+                parent_windows = [window for window in windows if window.pid == parent.pid]
+                if parent_windows:
+                    return parent_windows
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
 
@@ -64,18 +88,18 @@ class AudioRouter:
         try:
             process_name = process.name().casefold()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return None
+            return []
         candidates: list[WindowInfo] = []
-        for pid, window in windows.items():
+        for window in windows:
             try:
-                if psutil.Process(pid).name().casefold() == process_name:
+                if psutil.Process(window.pid).name().casefold() == process_name:
                     candidates.append(window)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-        return max(candidates, key=lambda item: item.area, default=None)
+        return candidates
 
     def apply(self, separation: float) -> list[RoutedApp]:
-        windows = visible_windows_by_pid()
+        windows = visible_windows()
         monitors = monitor_layout()
         routed: list[RoutedApp] = []
 
@@ -85,7 +109,7 @@ class AudioRouter:
                 continue
             try:
                 name = process.name()
-                window = self._window_for_session(process, windows)
+                candidates = self._windows_for_session(process, windows)
                 channels = session.channelAudioVolume()
                 if channels.GetChannelCount() < 2:
                     continue
@@ -97,6 +121,26 @@ class AudioRouter:
                         channels.GetChannelVolume(1),
                     )
                 original_left, original_right = self._original[key]
+
+                option_by_handle = {window.handle: window for window in candidates}
+                override = self._window_overrides.get(key)
+                window = option_by_handle.get(override)
+                if window is None:
+                    window = max(candidates, key=lambda item: item.area, default=None)
+                    if override is not None:
+                        self._window_overrides.pop(key, None)
+
+                options = tuple(
+                    WindowOption(
+                        candidate.handle,
+                        candidate.title,
+                        monitor_position(candidate, monitors),
+                    )
+                    for candidate in sorted(
+                        candidates,
+                        key=lambda item: (monitor_position(item, monitors), item.title.casefold()),
+                    )
+                )
 
                 if window is None or name.casefold() in self._excluded:
                     gains = (1.0, 1.0)
@@ -110,7 +154,16 @@ class AudioRouter:
                 channels.SetChannelVolume(0, original_left * gains[0], None)
                 channels.SetChannelVolume(1, original_right * gains[1], None)
                 routed.append(
-                    RoutedApp(name, session.ProcessId, title, position, *gains)
+                    RoutedApp(
+                        key,
+                        name,
+                        session.ProcessId,
+                        title,
+                        position,
+                        *gains,
+                        window.handle if window is not None else None,
+                        options,
+                    )
                 )
             except (OSError, RuntimeError):
                 log.debug("Audio session disappeared while updating", exc_info=True)
