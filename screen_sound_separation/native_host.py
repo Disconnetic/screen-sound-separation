@@ -8,12 +8,29 @@ import socket
 import struct
 import sys
 import threading
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import BinaryIO, Any
 
 from .browser import BRIDGE_HOST, BRIDGE_PORT
 
 
 MAX_MESSAGE_SIZE = 1024 * 1024
+
+
+def _log(message: str) -> None:
+    """Write diagnostics to a file without corrupting Chrome's stdout protocol."""
+    try:
+        data_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ScreenSoundSeparation"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        log_path = data_dir / "native-host.log"
+        if log_path.exists() and log_path.stat().st_size > 200_000:
+            log_path.write_text("", encoding="utf-8")
+        timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with log_path.open("a", encoding="utf-8") as stream:
+            stream.write(f"{timestamp} {message}\n")
+    except OSError:
+        pass
 
 
 def read_native_message(stream: BinaryIO) -> dict[str, Any] | None:
@@ -57,11 +74,15 @@ def _binary_stdio() -> tuple[BinaryIO, BinaryIO]:
 
 
 def run() -> int:
+    _log("host starting")
     stdin, stdout = _binary_stdio()
     output_lock = threading.Lock()
     try:
         connection = socket.create_connection((BRIDGE_HOST, BRIDGE_PORT), timeout=2.0)
-    except OSError:
+        connection.settimeout(None)
+        _log("connected to desktop")
+    except OSError as exc:
+        _log(f"desktop connection failed: {exc!r}")
         return 1
 
     def desktop_to_extension() -> None:
@@ -72,8 +93,8 @@ def run() -> int:
                     if isinstance(message, dict):
                         with output_lock:
                             write_native_message(stdout, message)
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            pass
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            _log(f"desktop reader stopped: {exc!r}")
         finally:
             # Closing the connection makes the main loop fail promptly when the
             # desktop app exits. This process exists only for this Chrome port,
@@ -83,6 +104,7 @@ def run() -> int:
                 connection.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
+            _log("desktop connection closed")
             os._exit(0)
 
     threading.Thread(target=desktop_to_extension, name="desktop-reader", daemon=True).start()
@@ -93,10 +115,12 @@ def run() -> int:
                 break
             payload = json.dumps(message, separators=(",", ":")).encode("utf-8") + b"\n"
             connection.sendall(payload)
-    except (OSError, EOFError, ValueError, UnicodeError, json.JSONDecodeError):
+    except (OSError, EOFError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        _log(f"Chrome reader stopped: {exc!r}")
         return 1
     finally:
         connection.close()
+        _log("host stopped")
     return 0
 
 

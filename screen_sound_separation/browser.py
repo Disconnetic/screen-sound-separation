@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 
-HOST_NAME = "com.thatoneguybanks.screen_sound_separation"
+HOST_NAME = "com.thatoneguybanks.screen_sound_separation.browser"
 DEV_EXTENSION_ID = "mbahplfohkgngffhkaokaaipbicpfcho"
 BRIDGE_HOST = "127.0.0.1"
 BRIDGE_PORT = 43821

@@ -1,7 +1,7 @@
 importScripts("layout.js");
 
 const OFFSCREEN_DOCUMENT = "offscreen.html";
-const NATIVE_HOST = "com.thatoneguybanks.screen_sound_separation";
+const NATIVE_HOST = "com.thatoneguybanks.screen_sound_separation.browser";
 let creatingOffscreenDocument = null;
 let nativePort = null;
 let desktopState = { connected: false, enabled: false, separation: 0.75 };
@@ -27,6 +27,8 @@ function connectToDesktop() {
       }
     });
     port.onDisconnect.addListener(() => {
+      const detail = chrome.runtime.lastError?.message;
+      if (detail) console.debug("Desktop bridge disconnected", detail);
       nativePort = null;
       desktopState = { ...desktopState, connected: false, enabled: false };
       releaseAll().catch(console.error);
