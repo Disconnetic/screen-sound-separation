@@ -17,6 +17,7 @@ strongly the two sides are separated.
 - Leaves background audio and processes without visible windows centered.
 - Uses a native Windows identity and bundled icon instead of the Python taskbar
   icon.
+- Prevents multiple router instances from competing over the same audio sessions.
 
 ## Run it
 
