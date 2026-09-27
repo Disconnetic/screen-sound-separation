@@ -16,6 +16,8 @@ class FakeChannels:
 class FakeSession:
     def __init__(self, identifier: str) -> None:
         self.InstanceIdentifier = identifier
+        self.ProcessId = 123
+        self.Process = object()
         self.channels = FakeChannels()
 
     def channelAudioVolume(self) -> FakeChannels:
@@ -71,15 +73,27 @@ def test_monitor_position_handles_three_displays() -> None:
     assert monitor_position(WindowInfo(3, "R", 2010, 10, 2900, 900), monitors) == 1
 
 
-def test_restore_returns_sessions_to_their_original_balance(monkeypatch) -> None:
+def test_restore_returns_touched_sessions_to_neutral_balance(monkeypatch) -> None:
     from screen_sound_separation.audio import AudioRouter, AudioUtilities
 
     session = FakeSession("test-session")
     monkeypatch.setattr(AudioUtilities, "GetAllSessions", lambda: [session])
 
     router = AudioRouter()
-    router._original["test-session"] = (0.8, 0.35)
+    router._touched.add("test-session")
     router.restore()
 
-    assert session.channels.values == [0.8, 0.35]
-    assert router._original == {}
+    assert session.channels.values == [1.0, 1.0]
+    assert router._touched == set()
+
+
+def test_startup_repair_centres_stale_channel_balance(monkeypatch) -> None:
+    from screen_sound_separation.audio import AudioRouter, AudioUtilities
+
+    session = FakeSession("stale-session")
+    session.channels.values = [0.13, 0.06]
+    monkeypatch.setattr(AudioUtilities, "GetAllSessions", lambda: [session])
+
+    AudioRouter().repair_stale_balances()
+
+    assert session.channels.values == [1.0, 1.0]

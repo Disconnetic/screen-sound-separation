@@ -69,9 +69,8 @@ left/right channel gains. It changes balance, not the selected audio device.
 
 ## Safety
 
-The app captures the original left/right session values before changing them and
-restores those values when you stop routing or close the window. Shutdown cleanup
-also runs if the event loop exits unexpectedly or the app receives a console
-interrupt. If the process is force-killed, Windows may retain the last session
-balance because no application cleanup can run. Restart the affected audio app to
-create a fresh session, or reset its channel balance in Windows.
+The app changes per-channel balance multipliers, not the normal Windows app-volume
+control. It sets both multipliers back to `1.0` when you stop routing or close the
+window. Shutdown cleanup also runs if the event loop exits unexpectedly or the app
+receives a console interrupt. If the process is force-killed, the next launch
+repairs any stale balance before routing starts.

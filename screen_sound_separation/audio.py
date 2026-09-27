@@ -29,7 +29,7 @@ class AudioRouter:
     """Apply and restore per-session stereo channel gains."""
 
     def __init__(self) -> None:
-        self._original: dict[str, tuple[float, float]] = {}
+        self._touched: set[str] = set()
         self._excluded: set[str] = set()
 
     @property
@@ -90,14 +90,6 @@ class AudioRouter:
                 if channels.GetChannelCount() < 2:
                     continue
 
-                key = session.InstanceIdentifier
-                if key not in self._original:
-                    self._original[key] = (
-                        channels.GetChannelVolume(0),
-                        channels.GetChannelVolume(1),
-                    )
-                original_left, original_right = self._original[key]
-
                 if window is None or name.casefold() in self._excluded:
                     gains = (1.0, 1.0)
                     title = "No visible window" if window is None else window.title
@@ -107,8 +99,12 @@ class AudioRouter:
                     gains = channel_gains(position, separation)
                     title = window.title
 
-                channels.SetChannelVolume(0, original_left * gains[0], None)
-                channels.SetChannelVolume(1, original_right * gains[1], None)
+                # Channel volumes are balance multipliers, separate from the
+                # session's normal master volume. Set them absolutely so a crash
+                # and restart can never compound an already-reduced channel.
+                channels.SetChannelVolume(0, gains[0], None)
+                channels.SetChannelVolume(1, gains[1], None)
+                self._touched.add(session.InstanceIdentifier)
                 routed.append(
                     RoutedApp(name, session.ProcessId, title, position, *gains)
                 )
@@ -118,27 +114,36 @@ class AudioRouter:
         return sorted(routed, key=lambda app: (app.name.casefold(), app.pid))
 
     def restore(self) -> None:
-        """Restore channel volumes captured before routing started."""
-        if not self._original:
+        """Return every session changed by this router to neutral balance."""
+        if not self._touched:
             return
 
+        if self._set_neutral_balance(self._touched):
+            self._touched.clear()
+
+    def repair_stale_balances(self) -> None:
+        """Centre active sessions in case a previous run was force-terminated."""
+        self._set_neutral_balance(None)
+
+    @staticmethod
+    def _set_neutral_balance(session_ids: set[str] | None) -> bool:
+        """Set channel multipliers to 1.0 without changing master volume."""
         try:
             sessions = AudioUtilities.GetAllSessions()
         except (OSError, RuntimeError):
-            # Keep the saved values so another shutdown fallback can retry if the
-            # Windows audio service was only temporarily unavailable.
             log.warning("Could not enumerate audio sessions while restoring", exc_info=True)
-            return
+            return False
 
         for session in sessions:
-            original = self._original.get(session.InstanceIdentifier)
-            if original is None:
+            if session.Process is None or session.ProcessId == 0:
+                continue
+            if session_ids is not None and session.InstanceIdentifier not in session_ids:
                 continue
             try:
                 channels = session.channelAudioVolume()
                 if channels.GetChannelCount() >= 2:
-                    channels.SetChannelVolume(0, original[0], None)
-                    channels.SetChannelVolume(1, original[1], None)
+                    channels.SetChannelVolume(0, 1.0, None)
+                    channels.SetChannelVolume(1, 1.0, None)
             except (OSError, RuntimeError):
                 log.debug("Audio session disappeared while restoring", exc_info=True)
-        self._original.clear()
+        return True
