@@ -1,7 +1,56 @@
 importScripts("layout.js");
 
 const OFFSCREEN_DOCUMENT = "offscreen.html";
+const NATIVE_HOST = "com.thatoneguybanks.screen_sound_separation";
 let creatingOffscreenDocument = null;
+let nativePort = null;
+let desktopState = { connected: false, enabled: false, separation: 0.75 };
+
+function connectToDesktop() {
+  if (nativePort) return;
+
+  try {
+    const port = chrome.runtime.connectNative(NATIVE_HOST);
+    nativePort = port;
+    port.onMessage.addListener((message) => {
+      desktopState.connected = true;
+      if (message.type === "state") {
+        desktopState.enabled = Boolean(message.enabled);
+        desktopState.separation = Math.max(0, Math.min(1, Number(message.separation) || 0));
+        if (desktopState.enabled) {
+          refreshCapturedTabs().catch(console.error);
+        } else {
+          releaseAll().catch(console.error);
+        }
+      } else if (message.type === "release_all") {
+        releaseAll().catch(console.error);
+      }
+    });
+    port.onDisconnect.addListener(() => {
+      nativePort = null;
+      desktopState = { ...desktopState, connected: false, enabled: false };
+      releaseAll().catch(console.error);
+    });
+  } catch (error) {
+    nativePort = null;
+    console.debug("Desktop app is not available", error);
+  }
+}
+
+function notifyDesktop(message) {
+  if (!nativePort || !desktopState.connected) return;
+  try {
+    nativePort.postMessage(message);
+  } catch (error) {
+    console.debug("Could not notify desktop app", error);
+  }
+}
+
+chrome.alarms.create("desktop-reconnect", { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "desktop-reconnect") connectToDesktop();
+});
+connectToDesktop();
 
 async function ensureOffscreenDocument() {
   const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_DOCUMENT);
@@ -56,12 +105,26 @@ async function clearManagedBadge(tabId) {
 async function stopCapture(tabId) {
   await chrome.runtime.sendMessage({ target: "offscreen", type: "stop", tabId });
   await clearManagedBadge(tabId);
+  notifyDesktop({ type: "tab_status", tabId, captured: false });
+}
+
+async function releaseAll() {
+  const captures = await chrome.tabCapture.getCapturedTabs();
+  const active = captures.filter((capture) => ["pending", "active"].includes(capture.status));
+  await Promise.all(active.map((capture) => stopCapture(capture.tabId)));
 }
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (tab.id == null || tab.windowId == null) return;
 
   try {
+    connectToDesktop();
+    if (!desktopState.connected) {
+      throw new Error("Open the Screen Sound Separation desktop app first.");
+    }
+    if (!desktopState.enabled) {
+      throw new Error("Start routing in the desktop app first.");
+    }
     const captures = await chrome.tabCapture.getCapturedTabs();
     const existing = captures.find(
       (capture) => capture.tabId === tab.id && ["pending", "active"].includes(capture.status),
@@ -72,7 +135,8 @@ chrome.action.onClicked.addListener(async (tab) => {
     }
 
     await ensureOffscreenDocument();
-    const pan = await currentPan(tab.windowId);
+    const position = await currentPan(tab.windowId);
+    const pan = position * desktopState.separation;
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
     const result = await chrome.runtime.sendMessage({
       target: "offscreen",
@@ -86,6 +150,14 @@ chrome.action.onClicked.addListener(async (tab) => {
       throw new Error(result?.error || "The tab audio graph did not start.");
     }
     await setManagedBadge(tab.id, pan);
+    notifyDesktop({
+      type: "tab_status",
+      tabId: tab.id,
+      title: tab.title || "Browser tab",
+      side: position < -0.2 ? "Left" : position > 0.2 ? "Right" : "Centre",
+      pan,
+      captured: true,
+    });
   } catch (error) {
     console.error("Could not toggle tab capture", error);
     await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#e11d48" });
@@ -101,7 +173,8 @@ async function refreshCapturedTabs() {
     active.map(async (capture) => {
       try {
         const tab = await chrome.tabs.get(capture.tabId);
-        const pan = await currentPan(tab.windowId);
+        const position = await currentPan(tab.windowId);
+        const pan = position * desktopState.separation;
         await chrome.runtime.sendMessage({
           target: "offscreen",
           type: "update",
@@ -110,6 +183,14 @@ async function refreshCapturedTabs() {
           pan,
         });
         await setManagedBadge(capture.tabId, pan);
+        notifyDesktop({
+          type: "tab_status",
+          tabId: capture.tabId,
+          title: tab.title || "Browser tab",
+          side: position < -0.2 ? "Left" : position > 0.2 ? "Right" : "Centre",
+          pan,
+          captured: true,
+        });
       } catch (error) {
         console.warn("Could not refresh a captured tab", capture.tabId, error);
       }

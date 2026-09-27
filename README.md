@@ -18,6 +18,8 @@ strongly the two sides are separated.
 - Uses a native Windows identity and bundled icon instead of the Python taskbar
   icon.
 - Prevents multiple router instances from competing over the same audio sessions.
+- Adds optional per-tab Chrome separation through a small companion extension.
+- Ships as one Windows executable that installs its browser bridge per user.
 
 ## Run it
 
@@ -31,6 +33,11 @@ The first run creates a local virtual environment and installs the three small
 Windows audio dependencies. Click **Start routing**, play audio in two apps, and
 place their windows on different monitors.
 
+For browser tabs, select **Set up extension** in the app. The unpublished
+development build opens the bundled extension folder and explains how to load it.
+Once the extension is on the Chrome Web Store, this button will open its normal
+**Add to Chrome** page instead.
+
 For development:
 
 ```powershell
@@ -38,6 +45,15 @@ py -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python -m pytest
 ```
+
+To build the self-contained Windows executable and extension upload package:
+
+```powershell
+.\scripts\build_release.ps1
+```
+
+The outputs are written to `dist/`. The desktop executable embeds the native
+browser helper and extension files; end users do not need Python installed.
 
 ## Project layout
 
@@ -47,6 +63,9 @@ The code is deliberately split into a few small modules:
 - `audio.py` reads and adjusts Windows audio sessions.
 - `windows.py` finds displays, windows, and their process IDs.
 - `routing.py` contains the testable left/right mixing calculation.
+- `browser.py` registers and serves the local browser-control bridge.
+- `native_host.py` implements Chrome's length-prefixed messaging protocol.
+- `browser_extension/` captures and pans explicitly enabled Chrome tabs.
 - `assets/` contains the PNG and multi-resolution Windows icon used by the app.
 
 Start with `routing.py` if you are new to the project; it has no Windows API or

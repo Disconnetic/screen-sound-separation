@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import atexit
 import ctypes
+import os
 import tkinter as tk
+import webbrowser
 from ctypes import wintypes
 from importlib.resources import files
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from .audio import AudioRouter, RoutedApp
+from .browser import (
+    BROWSER_PROCESSES,
+    CHROME_WEB_STORE_URL,
+    BrowserBridge,
+    BrowserTab,
+    install_native_host,
+    prepare_extension_files,
+)
 
 
 # A small, shared palette keeps the UI consistent without introducing a theme
@@ -80,14 +90,28 @@ class SeparationApp(tk.Tk):
         self.configure(bg=BG)
 
         self.router = AudioRouter()
+        self.browser_bridge = BrowserBridge()
+        self.browser_host_error: str | None = None
+        self.extension_path = None
+        try:
+            install_native_host()
+            self.extension_path = prepare_extension_files()
+            self.browser_bridge.start()
+        except (OSError, ValueError) as exc:
+            self.browser_host_error = str(exc)
         # Repair balance left behind by a previous forced termination before the
         # user starts a new routing session. This does not change master volume.
         self.router.repair_stale_balances()
         # This is a final safety net for exits that do not arrive through the
         # window's close button, such as a console interrupt or an internal error.
         atexit.register(self.router.restore)
+        atexit.register(self.browser_bridge.close)
         self.running = False
         self._after_id: str | None = None
+        self._browser_after_id: str | None = None
+        self._last_apps: list[RoutedApp] = []
+        self.browser_tabs: dict[int, BrowserTab] = {}
+        self.browser_connected = False
         self.separation = tk.DoubleVar(value=75)
         self.strength_text = tk.StringVar(value="75%")
         self.left_mix_text = tk.StringVar()
@@ -98,6 +122,7 @@ class SeparationApp(tk.Tk):
         self._build_style()
         self._build_ui()
         self._update_mix_preview(75)
+        self._poll_browser()
 
     def _load_icon(self) -> None:
         """Apply both icon formats used by Tk and the Windows taskbar."""
@@ -190,6 +215,7 @@ class SeparationApp(tk.Tk):
 
         self._build_header(root)
         self._build_separation_card(root)
+        self._build_browser_card(root)
         self._build_apps_table(root)
 
         ttk.Label(
@@ -283,6 +309,71 @@ class SeparationApp(tk.Tk):
         )
         self.toggle.pack(fill="x", pady=(18, 0))
 
+    def _build_browser_card(self, parent: ttk.Frame) -> None:
+        card = ttk.Frame(parent, style="Surface.TFrame", padding=(18, 14))
+        card.pack(fill="x", pady=(0, 20))
+
+        copy = ttk.Frame(card, style="Surface.TFrame")
+        copy.pack(side="left", fill="x", expand=True)
+        ttk.Label(copy, text="Browser tabs", style="CardHeading.TLabel").pack(anchor="w")
+        self.browser_detail = ttk.Label(
+            copy,
+            text="Waiting for the Chrome extension.",
+            style="SurfaceMuted.TLabel",
+        )
+        self.browser_detail.pack(anchor="w", pady=(3, 0))
+
+        self.browser_badge = tk.Label(
+            card,
+            text="●  WAITING",
+            bg=SURFACE_RAISED,
+            fg=MUTED,
+            font=("Segoe UI Semibold", 9),
+            padx=11,
+            pady=6,
+        )
+        self.browser_badge.pack(side="right", padx=(12, 0))
+        self.browser_setup = tk.Button(
+            card,
+            text="Set up extension",
+            command=self._open_browser_setup,
+            bg=SURFACE_RAISED,
+            activebackground="#273451",
+            fg=TEXT,
+            activeforeground=TEXT,
+            relief="flat",
+            borderwidth=0,
+            cursor="hand2",
+            font=("Segoe UI Semibold", 9),
+            padx=12,
+            pady=6,
+        )
+        self.browser_setup.pack(side="right", padx=(12, 0))
+
+    def _open_browser_setup(self) -> None:
+        """Offer the Web Store build, or development files before publication."""
+        if CHROME_WEB_STORE_URL:
+            webbrowser.open(CHROME_WEB_STORE_URL)
+            return
+        if self.extension_path is None:
+            messagebox.showerror("Browser support", "The extension files are unavailable.")
+            return
+
+        path = str(self.extension_path)
+        self.clipboard_clear()
+        self.clipboard_append(path)
+        os.startfile(path)
+        messagebox.showinfo(
+            "Set up Chrome browser support",
+            "The extension folder is open and its path is copied.\n\n"
+            "Until the Web Store listing is published:\n"
+            "1. Remove an older Screen Sound Separation test extension, if shown.\n"
+            "2. Open chrome://extensions in Chrome.\n"
+            "3. Turn on Developer mode.\n"
+            "4. Choose Load unpacked and select the open folder.\n\n"
+            "The public release will replace this with Add to Chrome.",
+        )
+
     def _build_mix_panel(
         self,
         parent: ttk.Frame,
@@ -338,6 +429,7 @@ class SeparationApp(tk.Tk):
         strength = round(float(value))
         self.strength_text.set(f"{strength}%")
         self._update_mix_preview(strength)
+        self.browser_bridge.update(self.running, strength / 100.0)
         if self.running:
             self._apply_once()
 
@@ -352,6 +444,8 @@ class SeparationApp(tk.Tk):
             if self._after_id is not None:
                 self.after_cancel(self._after_id)
                 self._after_id = None
+            self.browser_bridge.update(False, self.separation.get() / 100.0)
+            self.browser_bridge.release_all()
             self.router.restore()
             self.toggle.configure(text="▶  Start routing", bg=VIOLET)
             self.status_badge.configure(text="●  READY", fg=MUTED)
@@ -359,6 +453,7 @@ class SeparationApp(tk.Tk):
             self._render([])
         else:
             self.running = True
+            self.browser_bridge.update(True, self.separation.get() / 100.0)
             self.toggle.configure(text="■  Stop and restore audio", bg="#334155")
             self.status_badge.configure(text="●  ACTIVE", fg=GREEN)
             self._refresh()
@@ -372,8 +467,11 @@ class SeparationApp(tk.Tk):
     def _apply_once(self) -> None:
         try:
             apps = self.router.apply(self.separation.get() / 100.0)
+            if self.browser_connected:
+                apps = [app for app in apps if app.name.casefold() not in BROWSER_PROCESSES]
+            self._last_apps = apps
             self._render(apps)
-            count = len(apps)
+            count = len(apps) + len(self.browser_tabs)
             self.status_badge.configure(text="●  ACTIVE", fg=GREEN)
             self.app_count.configure(text=f"{count} detected")
         except Exception as exc:  # Keep the UI responsive if Windows audio resets.
@@ -382,7 +480,8 @@ class SeparationApp(tk.Tk):
 
     def _render(self, apps: list[RoutedApp]) -> None:
         self.tree.delete(*self.tree.get_children())
-        for index, app in enumerate(apps):
+        rows: list[tuple[str, str, str]] = []
+        for app in apps:
             if app.title == "No visible window":
                 side = "No window"
             elif app.position < -0.2:
@@ -392,12 +491,74 @@ class SeparationApp(tk.Tk):
             else:
                 side = "Centre"
             mix = f"L {app.left_gain * 100:.0f}%   ·   R {app.right_gain * 100:.0f}%"
+            rows.append((app.name, side, mix))
+
+        for tab in sorted(self.browser_tabs.values(), key=lambda item: item.title.casefold()):
+            if tab.pan < 0:
+                gains = (1.0, 1.0 - abs(tab.pan))
+            else:
+                gains = (1.0 - abs(tab.pan), 1.0)
+            mix = f"L {gains[0] * 100:.0f}%   ·   R {gains[1] * 100:.0f}%"
+            rows.append((f"Chrome tab · {tab.title}", tab.side, mix))
+
+        for index, values in enumerate(rows):
             self.tree.insert(
                 "",
                 "end",
-                values=(app.name, side, mix),
+                values=values,
                 tags=("even" if index % 2 == 0 else "odd",),
             )
+
+    def _poll_browser(self) -> None:
+        """Apply extension status messages on Tk's UI thread."""
+        changed = False
+        for event in self.browser_bridge.poll_events():
+            event_type = event.get("type")
+            if event_type == "connected":
+                self.browser_connected = True
+                changed = True
+            elif event_type == "disconnected":
+                self.browser_connected = False
+                self.browser_tabs.clear()
+                changed = True
+            elif event_type == "tab_status":
+                try:
+                    tab_id = int(event["tabId"])
+                    if event.get("captured"):
+                        self.browser_tabs[tab_id] = BrowserTab(
+                            tab_id=tab_id,
+                            title=str(event.get("title") or "Browser tab"),
+                            side=str(event.get("side") or "Centre"),
+                            pan=max(-1.0, min(1.0, float(event.get("pan", 0.0)))),
+                        )
+                    else:
+                        self.browser_tabs.pop(tab_id, None)
+                    changed = True
+                except (KeyError, TypeError, ValueError):
+                    continue
+
+        self.router.set_excluded(BROWSER_PROCESSES if self.browser_connected else set())
+        if self.browser_host_error:
+            self.browser_badge.configure(text="●  UNAVAILABLE", fg=RED)
+            self.browser_detail.configure(text=self.browser_host_error)
+        elif self.browser_connected:
+            count = len(self.browser_tabs)
+            noun = "tab" if count == 1 else "tabs"
+            self.browser_badge.configure(text="●  CONNECTED", fg=GREEN)
+            self.browser_detail.configure(
+                text=f"{count} managed {noun}. Click the extension icon on a tab to toggle it."
+            )
+            self.browser_setup.configure(text="Extension connected", state="disabled")
+        else:
+            self.browser_badge.configure(text="●  WAITING", fg=MUTED)
+            self.browser_detail.configure(text="Waiting for the Chrome extension.")
+            self.browser_setup.configure(text="Set up extension", state="normal")
+
+        if changed:
+            self._render(self._last_apps)
+            if self.running:
+                self.app_count.configure(text=f"{len(self._last_apps) + len(self.browser_tabs)} detected")
+        self._browser_after_id = self.after(250, self._poll_browser)
 
     def _close(self) -> None:
         """Stop scheduled work, restore audio, and then close the window."""
@@ -405,12 +566,19 @@ class SeparationApp(tk.Tk):
         if self._after_id is not None:
             self.after_cancel(self._after_id)
             self._after_id = None
+        if self._browser_after_id is not None:
+            self.after_cancel(self._browser_after_id)
+            self._browser_after_id = None
         try:
+            self.browser_bridge.update(False, self.separation.get() / 100.0)
+            self.browser_bridge.release_all()
             self.router.restore()
         finally:
             # The explicit restore above gives us a predictable shutdown order;
             # unregister the fallback so it does not run again during teardown.
             atexit.unregister(self.router.restore)
+            self.browser_bridge.close()
+            atexit.unregister(self.browser_bridge.close)
             self.destroy()
 
 
@@ -432,6 +600,7 @@ def main() -> None:
     finally:
         if app is not None:
             # Covers KeyboardInterrupt and unexpected errors escaping Tk's event loop.
+            app.browser_bridge.close()
             app.router.restore()
         _release_instance_mutex(mutex)
 

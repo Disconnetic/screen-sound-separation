@@ -1,11 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Screen Sound Separation — Tab Test",
-  "version": "0.1.0",
-  "description": "Experimental per-tab audio panning for Screen Sound Separation.",
+  "name": "Screen Sound Separation — Browser Support",
+  "version": "0.2.0",
+  "description": "Adds per-tab audio positioning to the Screen Sound Separation desktop app.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0pRL1JZqgZxaNAmlod7v78L/AxAiEO618Vu7Yw3swYuDYpehimh/hssZGzg62mLassk4b9fUe24gS8+S8mVp8LiIseBaipN84hN9G6EKyWJeSGPwvXbijsD7uR+ES6ErXf8ZTJZjguc2saf7fzddmgPClDsLtG3zcvLwdzPSHS4ASFWozgzNY3wWCSwMf1D7MHArcPIN6iMSJx4QHbTcvYqg5FUD14uKC0n6Xs+rg4W8DhiAs5Gdp3q+E1ZtRe8LO19uLXyWDyz8qgmQct2JMiYyoffcCiV0GwK//RQvpu/kNh30wLogaxv3R3Bj+13fNlXAhmFySoBzTmfw0knchQIDAQAB",
   "minimum_chrome_version": "116",
   "permissions": [
     "activeTab",
+    "alarms",
+    "nativeMessaging",
     "offscreen",
     "tabCapture"
   ],
