@@ -2,6 +2,26 @@ from screen_sound_separation.routing import channel_gains, normalized_position
 from screen_sound_separation.windows import MonitorInfo, WindowInfo, monitor_position
 
 
+class FakeChannels:
+    def __init__(self) -> None:
+        self.values = [0.0, 0.0]
+
+    def GetChannelCount(self) -> int:
+        return 2
+
+    def SetChannelVolume(self, channel: int, value: float, _context: object) -> None:
+        self.values[channel] = value
+
+
+class FakeSession:
+    def __init__(self, identifier: str) -> None:
+        self.InstanceIdentifier = identifier
+        self.channels = FakeChannels()
+
+    def channelAudioVolume(self) -> FakeChannels:
+        return self.channels
+
+
 def test_zero_separation_keeps_stereo() -> None:
     assert channel_gains(-1, 0) == (1, 1)
     assert channel_gains(1, 0) == (1, 1)
@@ -49,3 +69,17 @@ def test_monitor_position_handles_three_displays() -> None:
     assert monitor_position(WindowInfo(1, "L", 10, 10, 900, 900), monitors) == -1
     assert monitor_position(WindowInfo(2, "C", 1010, 10, 1900, 900), monitors) == 0
     assert monitor_position(WindowInfo(3, "R", 2010, 10, 2900, 900), monitors) == 1
+
+
+def test_restore_returns_sessions_to_their_original_balance(monkeypatch) -> None:
+    from screen_sound_separation.audio import AudioRouter, AudioUtilities
+
+    session = FakeSession("test-session")
+    monkeypatch.setattr(AudioUtilities, "GetAllSessions", lambda: [session])
+
+    router = AudioRouter()
+    router._original["test-session"] = (0.8, 0.35)
+    router.restore()
+
+    assert session.channels.values == [0.8, 0.35]
+    assert router._original == {}
