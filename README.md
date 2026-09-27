@@ -5,6 +5,8 @@ its main window is located. Put a browser on the left display and its sound lean
 left; move it to the right display and it follows. A single slider controls how
 strongly the two sides are separated.
 
+![Screen Sound Separation routing two apps](docs/screenshot.png)
+
 ## Prototype features
 
 - Detects the largest visible window for every active audio process.
@@ -13,6 +15,8 @@ strongly the two sides are separated.
 - Preserves each audio session's existing level and restores its original
   channel balance when routing stops or the app closes.
 - Leaves background audio and processes without visible windows centered.
+- Uses a native Windows identity and bundled icon instead of the Python taskbar
+  icon.
 
 ## Run it
 
@@ -33,6 +37,19 @@ py -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python -m pytest
 ```
+
+## Project layout
+
+The code is deliberately split into a few small modules:
+
+- `app.py` builds the window and refreshes it once per second.
+- `audio.py` reads and adjusts Windows audio sessions.
+- `windows.py` finds displays, windows, and their process IDs.
+- `routing.py` contains the testable left/right mixing calculation.
+- `assets/` contains the PNG and multi-resolution Windows icon used by the app.
+
+Start with `routing.py` if you are new to the project; it has no Windows API or
+UI code. The tests in `tests/` show the expected behaviour with concrete values.
 
 ## How it works
 
