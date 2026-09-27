@@ -545,9 +545,11 @@ class SeparationApp(tk.Tk):
             count = len(self.browser_tabs)
             noun = "tab" if count == 1 else "tabs"
             self.browser_badge.configure(text="●  CONNECTED", fg=GREEN)
-            self.browser_detail.configure(
-                text=f"{count} managed {noun}. Click the extension icon on a tab to toggle it."
-            )
+            if self.running:
+                detail = f"{count} managed {noun}. Click the extension icon on a tab to toggle it."
+            else:
+                detail = "Connected. Start routing to enable browser tab controls."
+            self.browser_detail.configure(text=detail)
             self.browser_setup.configure(text="Extension connected", state="disabled")
         else:
             self.browser_badge.configure(text="●  WAITING", fg=MUTED)

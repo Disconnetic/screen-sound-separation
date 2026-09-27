@@ -6,6 +6,35 @@ let creatingOffscreenDocument = null;
 let nativePort = null;
 let desktopState = { connected: false, enabled: false, separation: 0.75 };
 
+async function updateActionState() {
+  let title = "Open the Screen Sound Separation desktop app first.";
+  if (desktopState.connected && !desktopState.enabled) {
+    title = "Connected. Start routing in the desktop app first.";
+  } else if (desktopState.connected && desktopState.enabled) {
+    title = "Toggle audio separation for this tab";
+  }
+  await chrome.action.setTitle({ title });
+
+  // Clear expected OFF/error badges when the desktop state changes. Managed
+  // L/R/C badges are kept until their captures stop.
+  const tabs = await chrome.tabs.query({});
+  await Promise.all(
+    tabs.map(async (tab) => {
+      if (tab.id == null) return;
+      const badge = await chrome.action.getBadgeText({ tabId: tab.id });
+      if (["!", "OFF"].includes(badge)) {
+        await chrome.action.setBadgeText({ tabId: tab.id, text: "" });
+      }
+    }),
+  );
+}
+
+async function showNotReady(tabId, message) {
+  await chrome.action.setBadgeBackgroundColor({ tabId, color: "#64748b" });
+  await chrome.action.setBadgeText({ tabId, text: "OFF" });
+  await chrome.action.setTitle({ tabId, title: message });
+}
+
 function connectToDesktop() {
   if (nativePort) return;
 
@@ -22,6 +51,7 @@ function connectToDesktop() {
         } else {
           releaseAll().catch(console.error);
         }
+        updateActionState().catch(console.error);
       } else if (message.type === "release_all") {
         releaseAll().catch(console.error);
       }
@@ -32,6 +62,7 @@ function connectToDesktop() {
       nativePort = null;
       desktopState = { ...desktopState, connected: false, enabled: false };
       releaseAll().catch(console.error);
+      updateActionState().catch(console.error);
     });
   } catch (error) {
     nativePort = null;
@@ -119,14 +150,17 @@ async function releaseAll() {
 chrome.action.onClicked.addListener(async (tab) => {
   if (tab.id == null || tab.windowId == null) return;
 
+  connectToDesktop();
+  if (!desktopState.connected) {
+    await showNotReady(tab.id, "Open the Screen Sound Separation desktop app first.");
+    return;
+  }
+  if (!desktopState.enabled) {
+    await showNotReady(tab.id, "Connected. Start routing in the desktop app first.");
+    return;
+  }
+
   try {
-    connectToDesktop();
-    if (!desktopState.connected) {
-      throw new Error("Open the Screen Sound Separation desktop app first.");
-    }
-    if (!desktopState.enabled) {
-      throw new Error("Start routing in the desktop app first.");
-    }
     const captures = await chrome.tabCapture.getCapturedTabs();
     const existing = captures.find(
       (capture) => capture.tabId === tab.id && ["pending", "active"].includes(capture.status),
