@@ -55,6 +55,9 @@ class SeparationApp(tk.Tk):
         self.configure(bg=BG)
 
         self.router = AudioRouter()
+        # Repair balance left behind by a previous forced termination before the
+        # user starts a new routing session. This does not change master volume.
+        self.router.repair_stale_balances()
         # This is a final safety net for exits that do not arrive through the
         # window's close button, such as a console interrupt or an internal error.
         atexit.register(self.router.restore)
