@@ -20,6 +20,8 @@ screen-sound-separation = "screen_sound_separation.app:main"
 [tool.setuptools.packages.find]
 include = ["screen_sound_separation*"]
 
+[tool.setuptools.package-data]
+screen_sound_separation = ["assets/*.png", "assets/*.ico"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

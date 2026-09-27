@@ -1,105 +1,318 @@
-"""Tk desktop interface for Screen Sound Separation."""
+"""Desktop interface for Screen Sound Separation."""
 
 from __future__ import annotations
 
+import ctypes
 import tkinter as tk
+from importlib.resources import files
 from tkinter import ttk
 
 from .audio import AudioRouter, RoutedApp
 
 
-BG = "#111318"
-PANEL = "#1b1f27"
-TEXT = "#f4f6fb"
-MUTED = "#9ba3b5"
-ACCENT = "#7467f0"
+# A small, shared palette keeps the UI consistent without introducing a theme
+# dependency for what is intentionally a lightweight utility.
+BG = "#090e1a"
+SURFACE = "#111827"
+SURFACE_RAISED = "#172033"
+BORDER = "#263248"
+TEXT = "#f4f7ff"
+MUTED = "#94a3b8"
+VIOLET = "#9b6cff"
+CYAN = "#22d3ee"
+GREEN = "#34d399"
+RED = "#fb7185"
+
+APP_ID = "ThatOneGuyBanks.ScreenSoundSeparation"
+
+
+def _asset_path(name: str) -> str:
+    """Return an absolute path to a packaged application asset."""
+    return str(files("screen_sound_separation").joinpath("assets", name))
+
+
+def _set_windows_identity() -> None:
+    """Give Windows a stable identity so the taskbar uses our icon, not Python's."""
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    except (AttributeError, OSError):
+        # Keeping this harmless makes importing the UI possible on non-Windows
+        # machines, even though audio routing itself remains Windows-only.
+        pass
 
 
 class SeparationApp(tk.Tk):
+    """Small control surface for the screen-aware audio router."""
+
     def __init__(self) -> None:
+        _set_windows_identity()
         super().__init__()
+
         self.title("Screen Sound Separation")
-        self.geometry("720x540")
-        self.minsize(620, 440)
+        self.geometry("800x720")
+        self.minsize(700, 620)
         self.configure(bg=BG)
+
         self.router = AudioRouter()
         self.running = False
         self._after_id: str | None = None
         self.separation = tk.DoubleVar(value=75)
-        self.status = tk.StringVar(value="Routing is off")
         self.strength_text = tk.StringVar(value="75%")
+        self.left_mix_text = tk.StringVar()
+        self.right_mix_text = tk.StringVar()
+
+        self._load_icon()
         self.protocol("WM_DELETE_WINDOW", self._close)
         self._build_style()
         self._build_ui()
+        self._update_mix_preview(75)
+
+    def _load_icon(self) -> None:
+        """Apply both icon formats used by Tk and the Windows taskbar."""
+        try:
+            self._icon_image = tk.PhotoImage(file=_asset_path("app-icon.png"))
+            self.iconphoto(True, self._icon_image)
+            self.iconbitmap(_asset_path("app-icon.ico"))
+        except tk.TclError:
+            # A missing asset should never prevent the audio tool from opening.
+            self._icon_image = None
 
     def _build_style(self) -> None:
         style = ttk.Style(self)
         style.theme_use("clam")
+
         style.configure("TFrame", background=BG)
-        style.configure("Card.TFrame", background=PANEL)
+        style.configure("Surface.TFrame", background=SURFACE)
+        style.configure("Raised.TFrame", background=SURFACE_RAISED)
         style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 10))
-        style.configure("Title.TLabel", font=("Segoe UI Semibold", 23), foreground=TEXT)
-        style.configure("Muted.TLabel", foreground=MUTED)
-        style.configure("Card.TLabel", background=PANEL, foreground=TEXT)
-        style.configure("Strength.TLabel", background=PANEL, foreground=ACCENT, font=("Segoe UI Semibold", 16))
-        style.configure("TButton", font=("Segoe UI Semibold", 10), padding=(18, 10))
-        style.configure("Accent.TButton", background=ACCENT, foreground="white")
-        style.map("Accent.TButton", background=[("active", "#8a80f5")])
-        style.configure("Treeview", background=PANEL, fieldbackground=PANEL, foreground=TEXT, rowheight=30, borderwidth=0)
-        style.configure("Treeview.Heading", background="#242a35", foreground=TEXT, relief="flat")
-        style.map("Treeview", background=[("selected", "#343052")])
+        style.configure(
+            "Title.TLabel", background=BG, foreground=TEXT, font=("Segoe UI Semibold", 22)
+        )
+        style.configure("Muted.TLabel", background=BG, foreground=MUTED)
+        style.configure("Surface.TLabel", background=SURFACE, foreground=TEXT)
+        style.configure("SurfaceMuted.TLabel", background=SURFACE, foreground=MUTED)
+        style.configure(
+            "CardHeading.TLabel",
+            background=SURFACE,
+            foreground=TEXT,
+            font=("Segoe UI Semibold", 12),
+        )
+        style.configure(
+            "Percent.TLabel",
+            background=SURFACE,
+            foreground=VIOLET,
+            font=("Segoe UI Semibold", 24),
+        )
+        style.configure(
+            "MixTitle.TLabel",
+            background=SURFACE_RAISED,
+            foreground=MUTED,
+            font=("Segoe UI Semibold", 9),
+        )
+        style.configure(
+            "MixValue.TLabel",
+            background=SURFACE_RAISED,
+            foreground=TEXT,
+            font=("Segoe UI Semibold", 11),
+        )
+        style.configure(
+            "Separator.Horizontal.TScale",
+            background=SURFACE,
+            troughcolor=BORDER,
+            lightcolor=VIOLET,
+            darkcolor=VIOLET,
+            bordercolor=SURFACE,
+        )
+        style.configure(
+            "Treeview",
+            background=SURFACE,
+            fieldbackground=SURFACE,
+            foreground=TEXT,
+            borderwidth=0,
+            rowheight=36,
+            font=("Segoe UI", 10),
+        )
+        style.configure(
+            "Treeview.Heading",
+            background=SURFACE_RAISED,
+            foreground=MUTED,
+            relief="flat",
+            borderwidth=0,
+            font=("Segoe UI Semibold", 9),
+        )
+        style.map("Treeview", background=[("selected", "#273451")])
+        style.map("Treeview.Heading", background=[("active", SURFACE_RAISED)])
+        style.configure(
+            "App.Vertical.TScrollbar",
+            background=SURFACE_RAISED,
+            troughcolor=SURFACE,
+            bordercolor=SURFACE,
+            arrowcolor=MUTED,
+            lightcolor=SURFACE_RAISED,
+            darkcolor=SURFACE_RAISED,
+        )
 
     def _build_ui(self) -> None:
-        root = ttk.Frame(self, padding=28)
+        root = ttk.Frame(self, padding=(30, 26, 30, 22))
         root.pack(fill="both", expand=True)
 
-        ttk.Label(root, text="Screen Sound Separation", style="Title.TLabel").pack(anchor="w")
+        self._build_header(root)
+        self._build_separation_card(root)
+        self._build_apps_table(root)
+
         ttk.Label(
             root,
-            text="Hear each app from the side of your desk where its window lives.",
+            text="Audio follows the monitor containing most of each app window.",
             style="Muted.TLabel",
-        ).pack(anchor="w", pady=(3, 22))
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(12, 0))
 
-        card = ttk.Frame(root, style="Card.TFrame", padding=20)
-        card.pack(fill="x")
-        header = ttk.Frame(card, style="Card.TFrame")
-        header.pack(fill="x")
-        ttk.Label(header, text="Separation", style="Card.TLabel", font=("Segoe UI Semibold", 12)).pack(side="left")
-        ttk.Label(header, textvariable=self.strength_text, style="Strength.TLabel").pack(side="right")
+    def _build_header(self, parent: ttk.Frame) -> None:
+        header = ttk.Frame(parent)
+        header.pack(fill="x", pady=(0, 20))
 
-        scale = tk.Scale(
-            card, from_=0, to=100, orient="horizontal", variable=self.separation,
-            command=self._slider_changed, showvalue=False, bg=PANEL, fg=TEXT,
-            troughcolor="#343946", activebackground=ACCENT, highlightthickness=0,
-            sliderrelief="flat", sliderlength=22,
+        if self._icon_image is not None:
+            compact_icon = self._icon_image.subsample(10, 10)
+            self._header_icon = compact_icon
+            ttk.Label(header, image=compact_icon, background=BG).pack(side="left", padx=(0, 14))
+
+        titles = ttk.Frame(header)
+        titles.pack(side="left", fill="x", expand=True)
+        ttk.Label(titles, text="Screen Sound Separation", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(
+            titles,
+            text="Place an app on a screen. Its sound follows.",
+            style="Muted.TLabel",
+        ).pack(anchor="w", pady=(2, 0))
+
+        self.status_badge = tk.Label(
+            header,
+            text="●  READY",
+            bg=SURFACE_RAISED,
+            fg=MUTED,
+            font=("Segoe UI Semibold", 9),
+            padx=12,
+            pady=7,
         )
-        scale.pack(fill="x", pady=(12, 2))
-        labels = ttk.Frame(card, style="Card.TFrame")
-        labels.pack(fill="x")
-        ttk.Label(labels, text="Shared stereo", style="Card.TLabel").pack(side="left")
-        ttk.Label(labels, text="Hard left / right", style="Card.TLabel").pack(side="right")
+        self.status_badge.pack(side="right")
 
-        actions = ttk.Frame(root)
-        actions.pack(fill="x", pady=18)
-        self.toggle = ttk.Button(actions, text="Start routing", style="Accent.TButton", command=self._toggle)
-        self.toggle.pack(side="left")
-        ttk.Label(actions, textvariable=self.status, style="Muted.TLabel").pack(side="left", padx=14)
+    def _build_separation_card(self, parent: ttk.Frame) -> None:
+        card = ttk.Frame(parent, style="Surface.TFrame", padding=20)
+        card.pack(fill="x", pady=(0, 20))
 
-        ttk.Label(root, text="Active audio apps", font=("Segoe UI Semibold", 12)).pack(anchor="w", pady=(4, 8))
+        heading = ttk.Frame(card, style="Surface.TFrame")
+        heading.pack(fill="x")
+        labels = ttk.Frame(heading, style="Surface.TFrame")
+        labels.pack(side="left", fill="x", expand=True)
+        ttk.Label(labels, text="Separation strength", style="CardHeading.TLabel").pack(anchor="w")
+        ttk.Label(
+            labels,
+            text="Choose how much sound crosses over to the opposite speaker.",
+            style="SurfaceMuted.TLabel",
+        ).pack(anchor="w", pady=(3, 0))
+        ttk.Label(heading, textvariable=self.strength_text, style="Percent.TLabel").pack(side="right")
+
+        scale = ttk.Scale(
+            card,
+            from_=0,
+            to=100,
+            orient="horizontal",
+            variable=self.separation,
+            command=self._slider_changed,
+            style="Separator.Horizontal.TScale",
+        )
+        scale.pack(fill="x", pady=(18, 5))
+
+        endpoints = ttk.Frame(card, style="Surface.TFrame")
+        endpoints.pack(fill="x")
+        ttk.Label(endpoints, text="Balanced stereo", style="SurfaceMuted.TLabel").pack(side="left")
+        ttk.Label(endpoints, text="Hard left / right", style="SurfaceMuted.TLabel").pack(side="right")
+
+        preview = ttk.Frame(card, style="Surface.TFrame")
+        preview.pack(fill="x", pady=(18, 0))
+        preview.columnconfigure((0, 1), weight=1, uniform="mix")
+        self._build_mix_panel(preview, 0, "APP ON LEFT SCREEN", self.left_mix_text, VIOLET)
+        self._build_mix_panel(preview, 1, "APP ON RIGHT SCREEN", self.right_mix_text, CYAN)
+
+        self.toggle = tk.Button(
+            card,
+            text="▶  Start routing",
+            command=self._toggle,
+            bg=VIOLET,
+            activebackground="#ac86ff",
+            fg="white",
+            activeforeground="white",
+            relief="flat",
+            borderwidth=0,
+            cursor="hand2",
+            font=("Segoe UI Semibold", 11),
+            padx=20,
+            pady=11,
+        )
+        self.toggle.pack(fill="x", pady=(18, 0))
+
+    def _build_mix_panel(
+        self,
+        parent: ttk.Frame,
+        column: int,
+        title: str,
+        value: tk.StringVar,
+        accent: str,
+    ) -> None:
+        panel = ttk.Frame(parent, style="Raised.TFrame", padding=(14, 11))
+        panel.grid(row=0, column=column, sticky="ew", padx=(0, 6) if column == 0 else (6, 0))
+        tk.Frame(panel, bg=accent, width=3, height=34).pack(side="left", padx=(0, 11))
+        content = ttk.Frame(panel, style="Raised.TFrame")
+        content.pack(side="left")
+        ttk.Label(content, text=title, style="MixTitle.TLabel").pack(anchor="w")
+        ttk.Label(content, textvariable=value, style="MixValue.TLabel").pack(anchor="w", pady=(2, 0))
+
+    def _build_apps_table(self, parent: ttk.Frame) -> None:
+        section = ttk.Frame(parent)
+        section.pack(fill="both", expand=True)
+
+        section_heading = ttk.Frame(section)
+        section_heading.pack(fill="x", pady=(0, 8))
+        ttk.Label(
+            section_heading, text="Active audio apps", font=("Segoe UI Semibold", 12)
+        ).pack(side="left")
+        self.app_count = ttk.Label(section_heading, text="Waiting to start", style="Muted.TLabel")
+        self.app_count.pack(side="right")
+
+        table_frame = ttk.Frame(section, style="Surface.TFrame")
+        table_frame.pack(fill="both", expand=True)
         columns = ("app", "screen", "mix")
-        self.tree = ttk.Treeview(root, columns=columns, show="headings", selectmode="none")
-        self.tree.heading("app", text="APP")
-        self.tree.heading("screen", text="POSITION")
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="none")
+        self.tree.heading("app", text="APPLICATION")
+        self.tree.heading("screen", text="WINDOW")
         self.tree.heading("mix", text="OUTPUT MIX")
-        self.tree.column("app", width=240)
-        self.tree.column("screen", width=120, anchor="center")
-        self.tree.column("mix", width=180, anchor="center")
-        self.tree.pack(fill="both", expand=True)
+        self.tree.column("app", width=280, minwidth=180)
+        self.tree.column("screen", width=130, minwidth=100, anchor="center")
+        self.tree.column("mix", width=190, minwidth=150, anchor="center")
+        self.tree.tag_configure("even", background=SURFACE)
+        self.tree.tag_configure("odd", background="#141d2e")
+        self.tree.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(
+            table_frame,
+            orient="vertical",
+            command=self.tree.yview,
+            style="App.Vertical.TScrollbar",
+        )
+        scrollbar.pack(side="right", fill="y")
+        self.tree.configure(yscrollcommand=scrollbar.set)
 
     def _slider_changed(self, value: str) -> None:
-        self.strength_text.set(f"{round(float(value))}%")
+        strength = round(float(value))
+        self.strength_text.set(f"{strength}%")
+        self._update_mix_preview(strength)
         if self.running:
             self._apply_once()
+
+    def _update_mix_preview(self, strength: int) -> None:
+        crossover = 100 - strength
+        self.left_mix_text.set(f"L 100%   ·   R {crossover}%")
+        self.right_mix_text.set(f"L {crossover}%   ·   R 100%")
 
     def _toggle(self) -> None:
         if self.running:
@@ -108,13 +321,15 @@ class SeparationApp(tk.Tk):
                 self.after_cancel(self._after_id)
                 self._after_id = None
             self.router.restore()
-            self.toggle.configure(text="Start routing")
-            self.status.set("Routing is off · original balance restored")
+            self.toggle.configure(text="▶  Start routing", bg=VIOLET)
+            self.status_badge.configure(text="●  READY", fg=MUTED)
+            self.app_count.configure(text="Waiting to start")
             self._render([])
         else:
             self.running = True
-            self.toggle.configure(text="Stop routing")
+            self.toggle.configure(text="■  Stop and restore audio", bg="#334155")
             self.status.set("Routing is active")
+            self.status_badge.configure(text="●  ACTIVE", fg=GREEN)
             self._refresh()
 
     def _refresh(self) -> None:
@@ -127,13 +342,16 @@ class SeparationApp(tk.Tk):
         try:
             apps = self.router.apply(self.separation.get() / 100.0)
             self._render(apps)
-            self.status.set(f"Routing {len(apps)} audio app{'s' if len(apps) != 1 else ''}")
-        except Exception as exc:  # keep the UI responsive if Windows audio resets
-            self.status.set(f"Audio unavailable: {exc}")
+            count = len(apps)
+            self.status_badge.configure(text="●  ACTIVE", fg=GREEN)
+            self.app_count.configure(text=f"{count} detected")
+        except Exception as exc:  # Keep the UI responsive if Windows audio resets.
+            self.status_badge.configure(text="●  AUDIO ERROR", fg=RED)
+            self.app_count.configure(text=f"Audio unavailable: {exc}")
 
     def _render(self, apps: list[RoutedApp]) -> None:
         self.tree.delete(*self.tree.get_children())
-        for app in apps:
+        for index, app in enumerate(apps):
             if app.title == "No visible window":
                 side = "No window"
             elif app.position < -0.2:
@@ -141,9 +359,14 @@ class SeparationApp(tk.Tk):
             elif app.position > 0.2:
                 side = "Right"
             else:
-                side = "Center"
-            mix = f"L {app.left_gain * 100:.0f}%  ·  R {app.right_gain * 100:.0f}%"
-            self.tree.insert("", "end", values=(app.name, side, mix))
+                side = "Centre"
+            mix = f"L {app.left_gain * 100:.0f}%   ·   R {app.right_gain * 100:.0f}%"
+            self.tree.insert(
+                "",
+                "end",
+                values=(app.name, side, mix),
+                tags=("even" if index % 2 == 0 else "odd",),
+            )
 
     def _close(self) -> None:
         self.running = False
