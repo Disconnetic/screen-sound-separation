@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import ctypes
 import tkinter as tk
 from importlib.resources import files
@@ -54,6 +55,9 @@ class SeparationApp(tk.Tk):
         self.configure(bg=BG)
 
         self.router = AudioRouter()
+        # This is a final safety net for exits that do not arrive through the
+        # window's close button, such as a console interrupt or an internal error.
+        atexit.register(self.router.restore)
         self.running = False
         self._after_id: str | None = None
         self.separation = tk.DoubleVar(value=75)
@@ -328,7 +332,6 @@ class SeparationApp(tk.Tk):
         else:
             self.running = True
             self.toggle.configure(text="■  Stop and restore audio", bg="#334155")
-            self.status.set("Routing is active")
             self.status_badge.configure(text="●  ACTIVE", fg=GREEN)
             self._refresh()
 
@@ -369,16 +372,27 @@ class SeparationApp(tk.Tk):
             )
 
     def _close(self) -> None:
+        """Stop scheduled work, restore audio, and then close the window."""
         self.running = False
         if self._after_id is not None:
             self.after_cancel(self._after_id)
-        self.router.restore()
-        self.destroy()
+            self._after_id = None
+        try:
+            self.router.restore()
+        finally:
+            # The explicit restore above gives us a predictable shutdown order;
+            # unregister the fallback so it does not run again during teardown.
+            atexit.unregister(self.router.restore)
+            self.destroy()
 
 
 def main() -> None:
     app = SeparationApp()
-    app.mainloop()
+    try:
+        app.mainloop()
+    finally:
+        # Covers KeyboardInterrupt and unexpected errors escaping Tk's event loop.
+        app.router.restore()
 
 
 if __name__ == "__main__":

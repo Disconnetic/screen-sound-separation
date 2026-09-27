@@ -119,7 +119,18 @@ class AudioRouter:
 
     def restore(self) -> None:
         """Restore channel volumes captured before routing started."""
-        for session in AudioUtilities.GetAllSessions():
+        if not self._original:
+            return
+
+        try:
+            sessions = AudioUtilities.GetAllSessions()
+        except (OSError, RuntimeError):
+            # Keep the saved values so another shutdown fallback can retry if the
+            # Windows audio service was only temporarily unavailable.
+            log.warning("Could not enumerate audio sessions while restoring", exc_info=True)
+            return
+
+        for session in sessions:
             original = self._original.get(session.InstanceIdentifier)
             if original is None:
                 continue
