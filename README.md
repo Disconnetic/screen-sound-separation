@@ -1,13 +1,23 @@
 # Screen Sound Separation
 
+[![Tests](https://github.com/ThatOneGuyBanks/screen-sound-separation/actions/workflows/ci.yml/badge.svg)](https://github.com/ThatOneGuyBanks/screen-sound-separation/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A small Windows app that pans each application's audio toward the monitor where
 its main window is located. Put a browser on the left display and its sound leans
 left; move it to the right display and it follows. A single slider controls how
 strongly the two sides are separated.
 
+> [!WARNING]
+> This is early, wildly undertested software. It works well enough on the machines
+> and audio setups it has been tried with, but it may behave incorrectly, fail to
+> restore channel balance, or simply not work on yours. Do not use it anywhere
+> important, safety-critical, or difficult to recover. Check your Windows audio
+> balance after experimenting with it.
+
 ![Screen Sound Separation routing two apps](docs/screenshot.png)
 
-## Prototype features
+## What works today
 
 - Detects the largest visible window for every active audio process.
 - Updates routing once per second as windows move between monitors.
@@ -65,6 +75,10 @@ To build the self-contained Windows executable and extension upload package:
 The outputs are written to `dist/`. The desktop executable embeds the native
 browser helper and extension files; end users do not need Python installed.
 
+There is no signed installer yet. Windows may warn about an unsigned executable.
+Review the source and build it yourself if that is a concern. Browser support is
+also still a manually loaded, unpacked Chrome extension.
+
 ## Project layout
 
 The code is deliberately split into a few small modules:
@@ -93,7 +107,7 @@ Captured browser tabs use Chrome's display metadata to identify their physical
 monitor. **Auto** follows that display; the row menu can override a mistaken or
 unusual layout without changing the Windows display configuration.
 
-## Prototype limitations
+## Known limitations
 
 - Windows only; the current implementation uses Core Audio and Win32 APIs.
 - Apps that play audio in a background process may not map to their visible UI.
@@ -109,3 +123,21 @@ control. It sets both multipliers back to `1.0` when you stop routing or close t
 window. Shutdown cleanup also runs if the event loop exits unexpectedly or the app
 receives a console interrupt. If the process is force-killed, the next launch
 repairs any stale balance before routing starts.
+
+That recovery behaviour has not been proven across every audio driver, device,
+application, sleep/resume cycle, or Windows update. The warning above still
+applies: verify your audio settings and do not rely on this tool in an important
+environment.
+
+## Project status and contributing
+
+This repository is an open-source alpha under the [MIT License](LICENSE). The
+desktop routing path and Chrome experiment have automated tests, but the project
+does not yet have broad hardware, driver, accessibility, clean-machine, or
+long-running reliability coverage. See [CHANGELOG.md](CHANGELOG.md) for release
+notes and [CONTRIBUTING.md](CONTRIBUTING.md) before sending a change.
+
+Bug reports are welcome. Please include your Windows version, audio device/driver,
+the affected application, whether browser capture was enabled, and exact steps to
+reproduce the problem. Do not include private tab titles, browsing data, or logs
+you have not reviewed.

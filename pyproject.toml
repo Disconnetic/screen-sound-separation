@@ -7,12 +7,27 @@ name = "screen-sound-separation"
 version = "0.3.0"
 description = "Pan Windows app audio toward the screen its window is on."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Win32 (MS Windows)",
+  "Operating System :: Microsoft :: Windows :: Windows 10",
+  "Operating System :: Microsoft :: Windows :: Windows 11",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Multimedia :: Sound/Audio",
+]
 dependencies = [
   "comtypes==1.4.17",
   "psutil==7.2.2",
   "pycaw==20260921",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ThatOneGuyBanks/screen-sound-separation"
+Repository = "https://github.com/ThatOneGuyBanks/screen-sound-separation"
+Issues = "https://github.com/ThatOneGuyBanks/screen-sound-separation/issues"
+Changelog = "https://github.com/ThatOneGuyBanks/screen-sound-separation/blob/main/CHANGELOG.md"
 
 [project.scripts]
 screen-sound-separation = "screen_sound_separation.app:main"
