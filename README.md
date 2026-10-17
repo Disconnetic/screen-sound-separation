@@ -21,8 +21,14 @@ strongly the two sides are separated.
 - Adds optional per-tab Chrome separation through a small companion extension.
 - Detects the physical display containing each captured browser window, even
   when only one Chrome window is open.
-- Lets you click a row's **Window** value to choose Auto, Left, Right, or Centre.
+- Lets you select a live source and choose Auto, Left, Centre, or Right directly.
 - Ships as one Windows executable that installs its browser bridge per user.
+- Uses a modern two-pane workspace with routing controls kept separate from live sources.
+- Adds Off, Soft, Focus, and Hard intensity presets alongside the continuous slider.
+- Lets you search live sources and filter the workspace to desktop apps or browser tabs.
+- Provides direct Auto, Left, Centre, and Right controls for the selected source.
+- Includes manual refresh, clear empty states, keyboard shortcuts, and an explicit
+  **Restore audio now** recovery action.
 
 ## Run it
 
@@ -67,6 +73,7 @@ The code is deliberately split into a few small modules:
 - `audio.py` reads and adjusts Windows audio sessions.
 - `windows.py` finds displays, windows, and their process IDs.
 - `routing.py` contains the testable left/right mixing calculation.
+- `presentation.py` contains testable labels, browser-pan display, and source filtering.
 - `browser.py` registers and serves the local browser-control bridge.
 - `native_host.py` implements Chrome's length-prefixed messaging protocol.
 - `browser_extension/` captures and pans explicitly enabled Chrome tabs.
