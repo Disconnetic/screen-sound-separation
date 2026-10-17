@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 
-from screen_sound_separation.browser import BrowserBridge
+from screen_sound_separation.browser import BrowserBridge, _remove_stale_native_hosts
 from screen_sound_separation.native_host import read_native_message, write_native_message
 
 
@@ -34,6 +34,21 @@ def test_native_message_rejects_incomplete_payload() -> None:
         pass
     else:
         raise AssertionError("Incomplete messages must be rejected")
+
+
+def test_stale_packaged_native_hosts_are_removed(tmp_path) -> None:
+    current = tmp_path / "native-host-current.exe"
+    stale = tmp_path / "native-host-stale.exe"
+    unrelated = tmp_path / "native-host.cmd"
+    current.write_bytes(b"current")
+    stale.write_bytes(b"stale")
+    unrelated.write_text("development helper", encoding="utf-8")
+
+    _remove_stale_native_hosts(tmp_path, current)
+
+    assert current.exists()
+    assert not stale.exists()
+    assert unrelated.exists()
 
 
 def test_browser_bridge_sends_state_and_receives_status() -> None:

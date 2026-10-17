@@ -27,6 +27,23 @@ def _data_dir() -> Path:
     return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ScreenSoundSeparation"
 
 
+def _remove_stale_native_hosts(data_dir: Path, current_host: Path) -> None:
+    """Remove superseded packaged host binaries while keeping the active one.
+
+    Packaged hosts use a content hash in their filename so upgrades can replace
+    a helper that Chrome still has open. Once the new file exists, older hashes
+    are no longer referenced and can be removed. A locked helper is harmless;
+    leave it for a later launch instead of failing browser setup.
+    """
+    for candidate in data_dir.glob("native-host-*.exe"):
+        if candidate == current_host:
+            continue
+        try:
+            candidate.unlink()
+        except OSError:
+            pass
+
+
 @dataclass(frozen=True)
 class BrowserTab:
     """A browser tab currently managed by the extension."""
@@ -61,6 +78,7 @@ def install_native_host() -> Path:
         host_path = data_dir / f"native-host-{digest}.exe"
         if not host_path.exists():
             shutil.copy2(bundled_host, host_path)
+        _remove_stale_native_hosts(data_dir, host_path)
         desktop_command = {
             "executable": str(Path(sys.executable)),
             "arguments": [],
