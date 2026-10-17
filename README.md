@@ -28,6 +28,8 @@ strongly the two sides are separated.
 - Uses a native Windows identity and bundled icon instead of the Python taskbar
   icon.
 - Prevents multiple router instances from competing over the same audio sessions.
+- Keeps routing behind an independent 1.5-second safety lease; if the interface
+  crashes, freezes, or is force-killed, a guardian process restores neutral stereo.
 - Adds optional per-tab Chrome separation through a small companion extension.
 - Detects the physical display containing each captured browser window, even
   when only one Chrome window is open.
@@ -107,6 +109,10 @@ Captured browser tabs use Chrome's display metadata to identify their physical
 monitor. **Auto** follows that display; the row menu can override a mistaken or
 unusual layout without changing the Windows display configuration.
 
+Chrome remains available as an ordinary desktop audio source whenever no tab is
+captured. Once per-tab capture is active, the desktop Chrome session is excluded
+to prevent the same browser audio being routed twice.
+
 ## Known limitations
 
 - Windows only; the current implementation uses Core Audio and Win32 APIs.
@@ -120,9 +126,15 @@ unusual layout without changing the Windows display configuration.
 
 The app changes per-channel balance multipliers, not the normal Windows app-volume
 control. It sets both multipliers back to `1.0` when you stop routing or close the
-window. Shutdown cleanup also runs if the event loop exits unexpectedly or the app
-receives a console interrupt. If the process is force-killed, the next launch
-repairs any stale balance before routing starts.
+window. While routing is active, the interface must renew a short lease with an
+independent guardian process four times per second. If that heartbeat disappears,
+the guardian restores every active stereo session to `1.0 / 1.0` and exits. The
+interface also restores directly during a clean stop, and the next launch repairs
+stale balance as a final fallback.
+
+The lease was verified by hard-panning a live Chrome session, force-killing the
+desktop UI, and observing the session return from `0.0 / 1.0` to `1.0 / 1.0`
+without pressing a recovery control.
 
 That recovery behaviour has not been proven across every audio driver, device,
 application, sleep/resume cycle, or Windows update. The warning above still

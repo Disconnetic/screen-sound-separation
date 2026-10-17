@@ -5,7 +5,11 @@ import subprocess
 import sys
 import time
 
-from screen_sound_separation.browser import BrowserBridge, _remove_stale_native_hosts
+from screen_sound_separation.browser import (
+    BrowserBridge,
+    _remove_stale_native_hosts,
+    browser_process_exclusions,
+)
 from screen_sound_separation.native_host import read_native_message, write_native_message
 
 
@@ -49,6 +53,11 @@ def test_stale_packaged_native_hosts_are_removed(tmp_path) -> None:
     assert current.exists()
     assert not stale.exists()
     assert unrelated.exists()
+
+
+def test_chrome_stays_a_desktop_source_until_a_tab_is_captured() -> None:
+    assert browser_process_exclusions(False) == set()
+    assert browser_process_exclusions(True) == {"chrome.exe"}
 
 
 def test_browser_bridge_sends_state_and_receives_status() -> None:

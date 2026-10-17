@@ -5,6 +5,7 @@ from __future__ import annotations
 import atexit
 import ctypes
 import os
+import sys
 import tkinter as tk
 import webbrowser
 from ctypes import wintypes
@@ -18,9 +19,11 @@ from .browser import (
     CHROME_WEB_STORE_URL,
     BrowserBridge,
     BrowserTab,
+    browser_process_exclusions,
     install_native_host,
     prepare_extension_files,
 )
+from .failsafe import AudioFailsafeLease, HEARTBEAT_INTERVAL_MS
 from .presentation import (
     SOURCE_FILTERS,
     mix_label,
@@ -103,6 +106,8 @@ class SeparationApp(tk.Tk):
         self.configure(bg=BG)
 
         self.router = AudioRouter()
+        self.failsafe = AudioFailsafeLease()
+        self.failsafe.start()
         self.browser_bridge = BrowserBridge()
         self.browser_host_error: str | None = None
         self.extension_path = None
@@ -115,10 +120,12 @@ class SeparationApp(tk.Tk):
 
         self.router.repair_stale_balances()
         atexit.register(self.router.restore)
+        atexit.register(self.failsafe.close)
         atexit.register(self.browser_bridge.close)
         self.running = False
         self._after_id: str | None = None
         self._browser_after_id: str | None = None
+        self._failsafe_after_id: str | None = None
         self._last_apps: list[RoutedApp] = []
         self.browser_tabs: dict[int, BrowserTab] = {}
         self.browser_connected = False
@@ -145,6 +152,7 @@ class SeparationApp(tk.Tk):
         self._update_mix_preview(75)
         self._render([])
         self._poll_browser()
+        self._pulse_failsafe()
 
     def _load_icon(self) -> None:
         try:
@@ -373,6 +381,13 @@ class SeparationApp(tk.Tk):
         if self.running:
             self._stop_routing("Routing stopped. Audio restored to centre.")
         else:
+            if not self.failsafe.start() or not self.failsafe.pulse():
+                self.router.restore()
+                messagebox.showerror(
+                    "Audio safety unavailable",
+                    "Routing was not started because the independent audio safety guardian is unavailable.",
+                )
+                return
             self.running = True
             self.browser_bridge.update(True, self.separation.get() / 100.0)
             self.toggle.configure(text="Stop routing", bg=PANEL_ALT, activebackground=PANEL_HOVER, fg=SIGNAL, activeforeground=SIGNAL)
@@ -387,6 +402,7 @@ class SeparationApp(tk.Tk):
             self._after_id = None
         self.browser_bridge.update(False, self.separation.get() / 100.0)
         self.browser_bridge.release_all()
+        self.failsafe.idle()
         self.router.restore()
         self.toggle.configure(text="Start routing", bg=ORANGE, activebackground=ORANGE_HOVER, fg=BG, activeforeground=BG)
         self.status_badge.configure(text="●  ROUTING OFF", fg=MUTED)
@@ -401,6 +417,7 @@ class SeparationApp(tk.Tk):
             self._stop_routing("Audio restored. Routing is off.")
             return
         self.browser_bridge.release_all()
+        self.failsafe.restore()
         self.router.restore()
         self.last_update_text.set("Audio restored to neutral stereo.")
 
@@ -419,7 +436,7 @@ class SeparationApp(tk.Tk):
     def _apply_once(self) -> None:
         try:
             apps = self.router.apply(self.separation.get() / 100.0)
-            if self.browser_connected:
+            if self.browser_tabs:
                 apps = [app for app in apps if app.name.casefold() not in BROWSER_PROCESSES]
             self._last_apps = apps
             self._render(apps)
@@ -578,7 +595,7 @@ class SeparationApp(tk.Tk):
                 except (KeyError, TypeError, ValueError):
                     continue
 
-        self.router.set_excluded(BROWSER_PROCESSES if self.browser_connected else set())
+        self.router.set_excluded(browser_process_exclusions(bool(self.browser_tabs)))
         if self.browser_host_error:
             self.browser_badge.configure(text="●  UNAVAILABLE", fg=RED)
             self.browser_detail.configure(text=self.browser_host_error)
@@ -600,6 +617,15 @@ class SeparationApp(tk.Tk):
                 self.activity_text.set(f"Routing {count} active {'source' if count == 1 else 'sources'}")
         self._browser_after_id = self.after(250, self._poll_browser)
 
+    def _pulse_failsafe(self) -> None:
+        if self.running and not self.failsafe.pulse():
+            self._stop_routing("Routing stopped because the audio safety guardian was lost.")
+            messagebox.showerror(
+                "Audio safety unavailable",
+                "Routing stopped and audio was restored because the independent safety guardian stopped responding.",
+            )
+        self._failsafe_after_id = self.after(HEARTBEAT_INTERVAL_MS, self._pulse_failsafe)
+
     def _close(self) -> None:
         self.running = False
         if self._after_id is not None:
@@ -608,18 +634,28 @@ class SeparationApp(tk.Tk):
         if self._browser_after_id is not None:
             self.after_cancel(self._browser_after_id)
             self._browser_after_id = None
+        if self._failsafe_after_id is not None:
+            self.after_cancel(self._failsafe_after_id)
+            self._failsafe_after_id = None
         try:
             self.browser_bridge.update(False, self.separation.get() / 100.0)
             self.browser_bridge.release_all()
+            self.failsafe.restore()
             self.router.restore()
         finally:
             atexit.unregister(self.router.restore)
+            self.failsafe.close()
+            atexit.unregister(self.failsafe.close)
             self.browser_bridge.close()
             atexit.unregister(self.browser_bridge.close)
             self.destroy()
 
 
 def main() -> None:
+    if "--audio-failsafe" in sys.argv:
+        from .failsafe import run
+
+        raise SystemExit(run())
     mutex = _acquire_instance_mutex()
     if mutex is None:
         ctypes.windll.user32.MessageBoxW(None, "Screen Sound Separation is already running.", "Screen Sound Separation", 0x40)
@@ -631,6 +667,8 @@ def main() -> None:
     finally:
         if app is not None:
             app.browser_bridge.close()
+            app.failsafe.restore()
+            app.failsafe.close()
             app.router.restore()
         _release_instance_mutex(mutex)
 

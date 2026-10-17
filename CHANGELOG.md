@@ -8,6 +8,10 @@ stability.
 
 - Open-sourced the project under the MIT License.
 - Added Windows continuous integration and explicit alpha safety guidance.
+- Added an independent heartbeat guardian that restores neutral stereo when the
+  routing interface crashes, freezes, or is force-killed.
+- Kept Chrome visible as an ordinary desktop source until per-tab capture is
+  actually active.
 
 ## [0.3.0] - 2026-10-17
 

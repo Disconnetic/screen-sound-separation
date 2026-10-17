@@ -25,6 +25,34 @@ class RoutedApp:
     right_gain: float
 
 
+def set_neutral_balance(session_ids: set[str] | None = None) -> bool:
+    """Set active stereo sessions back to neutral channel balance.
+
+    ``None`` deliberately means every active session. The independent safety
+    guardian uses that mode after a lost routing lease because it may not know
+    which session the desktop process was changing when it stopped.
+    """
+    try:
+        sessions = AudioUtilities.GetAllSessions()
+    except (OSError, RuntimeError):
+        log.warning("Could not enumerate audio sessions while restoring", exc_info=True)
+        return False
+
+    for session in sessions:
+        if session.Process is None or session.ProcessId == 0:
+            continue
+        if session_ids is not None and session.InstanceIdentifier not in session_ids:
+            continue
+        try:
+            channels = session.channelAudioVolume()
+            if channels.GetChannelCount() >= 2:
+                channels.SetChannelVolume(0, 1.0, None)
+                channels.SetChannelVolume(1, 1.0, None)
+        except (OSError, RuntimeError):
+            log.debug("Audio session disappeared while restoring", exc_info=True)
+    return True
+
+
 class AudioRouter:
     """Apply and restore per-session stereo channel gains."""
 
@@ -136,32 +164,9 @@ class AudioRouter:
         if not self._touched:
             return
 
-        if self._set_neutral_balance(self._touched):
+        if set_neutral_balance(self._touched):
             self._touched.clear()
 
     def repair_stale_balances(self) -> None:
         """Centre active sessions in case a previous run was force-terminated."""
-        self._set_neutral_balance(None)
-
-    @staticmethod
-    def _set_neutral_balance(session_ids: set[str] | None) -> bool:
-        """Set channel multipliers to 1.0 without changing master volume."""
-        try:
-            sessions = AudioUtilities.GetAllSessions()
-        except (OSError, RuntimeError):
-            log.warning("Could not enumerate audio sessions while restoring", exc_info=True)
-            return False
-
-        for session in sessions:
-            if session.Process is None or session.ProcessId == 0:
-                continue
-            if session_ids is not None and session.InstanceIdentifier not in session_ids:
-                continue
-            try:
-                channels = session.channelAudioVolume()
-                if channels.GetChannelCount() >= 2:
-                    channels.SetChannelVolume(0, 1.0, None)
-                    channels.SetChannelVolume(1, 1.0, None)
-            except (OSError, RuntimeError):
-                log.debug("Audio session disappeared while restoring", exc_info=True)
-        return True
+        set_neutral_balance()

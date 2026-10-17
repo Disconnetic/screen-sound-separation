@@ -23,6 +23,11 @@ BROWSER_PROCESSES = {"chrome.exe"}
 CHROME_WEB_STORE_URL: str | None = None
 
 
+def browser_process_exclusions(has_captured_tabs: bool) -> set[str]:
+    """Avoid double-routing Chrome only while per-tab capture is active."""
+    return set(BROWSER_PROCESSES) if has_captured_tabs else set()
+
+
 def _data_dir() -> Path:
     return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ScreenSoundSeparation"
 
